@@ -50,6 +50,21 @@ SEC-GFD stage (specialized method) on cached graphs:
 py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd
 ```
 
+Matrix stage (runs baselines + PMP + SEC-GFD):
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage matrix
+```
+
+Plots stage (generates figures under `runs/<exp>/plots/`):
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage plots
+```
+
+Notes:
+- `--stage plots` requires `matplotlib` in the active environment (`py -m pip install matplotlib`).
+
 Quick sanity check (clean graph only, first training seed only):
 
 ```bash

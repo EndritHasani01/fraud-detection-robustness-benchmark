@@ -34,6 +34,7 @@ All commands below assume you are in the repository root:
 | `py -m pip install torch==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu` | Installs CPU-only PyTorch (keeps setup simple on Windows without CUDA). |
 | `py -m pip install https://data.dgl.ai/wheels/dgl-2.2.1-cp311-cp311-win_amd64.whl` | Installs DGL 2.2.1 CPU wheel for Python 3.11 on Windows. |
 | `py -m pip install torchdata==0.8.0 PyYAML pydantic` | Installs packages required by DGL internals on Windows. |
+| `py -m pip install matplotlib` | Installs matplotlib (required for `--stage plots`). |
 | `py -c "import torch, dgl; print(torch.__version__); print(dgl.__version__)"` | Quick import check to confirm the ML stack loads correctly. |
 
 ### Benchmark Runner Commands
@@ -60,6 +61,8 @@ All commands below assume you are in the repository root:
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd` | Trains/evaluates SEC-GFD on cached graphs and appends rows to `runs/<experiment>/results.csv` (with `model_id=secgfd`). Also writes `results_summary_secgfd.csv` (mean/std across training seeds). Requires that `--stage graphs` already ran in the same output directory. |
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd --only-clean` | SEC-GFD on the clean graph only (fast sanity check). |
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd --max-training-seeds 1 --max-epochs 20 --patience 5` | SEC-GFD quick-run settings to reduce runtime while verifying the pipeline. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage matrix` | Runs the full model matrix (baselines + PMP + SEC-GFD) on cached graphs. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage plots` | Generates plots and plot-ready CSV summaries from `runs/<experiment>/results.csv` into `runs/<experiment>/plots/` (requires matplotlib). |
 
 Notes:
 - If you use `--out` for `--stage graphs`, you must also pass the same `--out` for `--stage baselines` so it can find `graph_variants.csv` and the cached graphs.
@@ -74,6 +77,7 @@ Notes:
 | Command | What it does |
 |---|---|
 | `Get-ChildItem runs\\gfd_robustness_benchmark_v1 -Force` | Lists the top-level outputs for the frozen experiment. |
+| `Get-ChildItem runs\\gfd_robustness_benchmark_v1\\plots -Force` | Lists generated plot artifacts (after `--stage plots`). |
 | `Get-Content runs\\gfd_robustness_benchmark_v1\\graph_variants.csv -TotalCount 5` | Prints the CSV header and first few variant rows (graph stats ledger). |
 | `Get-Content runs\\gfd_robustness_benchmark_v1\\results.csv -TotalCount 5` | Prints the CSV header and first few results rows (populated after `--stage baselines` / `--stage pmp` / `--stage secgfd`). |
 | `Get-Content runs\\gfd_robustness_benchmark_v1\\results_summary_baselines.csv -TotalCount 5` | Prints the baseline mean/std summary across training seeds. |
