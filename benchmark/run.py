@@ -58,9 +58,9 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
     # Copy config into output for reproducibility.
     write_json(paths.config_copy_path, cfg)
 
-    # Ensure CSVs exist with correct schema.
-    ensure_csv_header(paths.results_csv_path, RESULTS_COLUMNS)
-    ensure_csv_header(paths.variants_csv_path, VARIANTS_COLUMNS)
+    # Ensure CSVs exist with correct schema. If --force is set, start fresh.
+    ensure_csv_header(paths.results_csv_path, RESULTS_COLUMNS, overwrite=force)
+    ensure_csv_header(paths.variants_csv_path, VARIANTS_COLUMNS, overwrite=force)
 
     experiment_name = cfg["experiment_name"]
     graph_seeds = [int(s) for s in cfg["seeds"]["training_seeds"]]
@@ -112,6 +112,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                 scenario_id = scenario_cfg["scenario_id"]
                 oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
                 severity_values = scenario_cfg["severity_values"]
+                scenario_params = {k: v for k, v in scenario_cfg.items() if k not in {"severity_values"}}
 
                 for severity in severity_values:
                     for graph_seed in graph_seeds:
@@ -123,13 +124,13 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                             severity_param=str(scenario_cfg.get("severity_param", "severity")),
                             severity=float(severity),
                             graph_seed=int(graph_seed),
+                            params=scenario_params,
                         )
                         var_p = variant_graph_path(
                             paths.graphs_dir, dataset_id, split_id, scenario_id, float(severity), int(graph_seed)
                         )
 
-                        # Scenario application is currently a no-op until TODO-02.
-                        g_var, applied = apply_scenario(g_base, spec)
+                        g_var, applied, info = apply_scenario(g_base, spec)
 
                         var_meta = {
                             **base_meta,
@@ -139,6 +140,9 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                             "graph_seed": int(graph_seed),
                             "oracle_labels": oracle_labels,
                             "scenario_applied": bool(applied),
+                            "scenario_method": spec.method,
+                            "scenario_params": scenario_params,
+                            "scenario_info": info,
                         }
 
                         if applied:
@@ -212,4 +216,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

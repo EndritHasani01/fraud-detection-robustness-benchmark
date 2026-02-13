@@ -1,6 +1,14 @@
-# TODO 02: Implement the Stress-Test Perturbations
+# TODO 02: Implement the Stress-Test Perturbations (Implemented)
 
 Goal: implement controlled graph/feature transformations for heterophily, camouflage, and noise/density, parameterized by severity.
+
+Implemented artifacts:
+- Scenario application: `benchmark/scenarios.py`
+  - Heterophily stress (oracle): `rewire_edge_dst_to_opposite_label`
+  - Feature camouflage (oracle): `replace_fraud_features_with_normal_features` (supports blending via `gamma`)
+  - Noise/density: `add_random_edges` (supports `undirected`)
+- Graph stats logging (before/after via cached graphs): `benchmark/stats.py`
+- Variant metadata includes scenario proxy logs (counts/deltas/ratios) in `meta.json` for each cached variant graph.
 
 Work:
 - Implement heterophily stress:
@@ -27,6 +35,11 @@ Done when:
 - The runner can generate perturbed graphs for every scenario/severity and log graph stats.
 - Re-running with the same seed reproduces identical perturbed graphs (or identical summary stats if you store graphs).
 
+How to run:
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage graphs --force
+```
+
 Notes:
 - If a perturbation uses true labels from the full graph (including test labels), explicitly tag it as "oracle" in the results and report.
-

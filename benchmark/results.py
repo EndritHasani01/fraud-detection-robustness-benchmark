@@ -59,9 +59,9 @@ VARIANTS_COLUMNS = [
 ]
 
 
-def ensure_csv_header(path: Path, columns: list[str]) -> None:
+def ensure_csv_header(path: Path, columns: list[str], *, overwrite: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
+    if path.exists() and not overwrite:
         return
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -69,8 +69,7 @@ def ensure_csv_header(path: Path, columns: list[str]) -> None:
 
 
 def append_csv_row(path: Path, columns: list[str], row: dict) -> None:
-    ensure_csv_header(path, columns)
+    ensure_csv_header(path, columns, overwrite=False)
     with path.open("a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writerow({k: row.get(k, "") for k in columns})
-
