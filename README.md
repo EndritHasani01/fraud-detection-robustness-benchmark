@@ -6,8 +6,8 @@ Core idea:
 - Start from a real fraud graph dataset (YelpChi).
 - Generate controlled "stress-test" graph variants (heterophily, camouflage, noise/density).
 - Cache every graph variant to disk and log graph statistics to a single CSV.
-- Train/evaluate baseline models (MLP + GraphSAGE) and write results to `results.csv`.
-- Later steps (TODO-04+) integrate specialized methods (PMP, SEC-GFD).
+- Train/evaluate baseline models (MLP + GraphSAGE) and specialized methods (PMP, SEC-GFD) and write results to `results.csv`.
+- Later steps (TODO-06+) run the full grid and produce plots/report artifacts.
 
 The benchmark runner is in `benchmark/` and the current frozen experiment definition is `configs/exp_yelpchi_v1.json`.
 
@@ -57,12 +57,17 @@ All commands below assume you are in the repository root:
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp` | Trains/evaluates PMP (LA-SAGE-S) on cached graphs and appends rows to `runs/<experiment>/results.csv` (with `model_id=pmp`). Also writes `results_summary_pmp.csv` (mean/std across training seeds). Requires that `--stage graphs` already ran in the same output directory. |
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp --only-clean` | PMP on the clean graph only (fast sanity check). |
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp --max-training-seeds 1 --max-epochs 20 --patience 5` | PMP quick-run settings to reduce runtime while verifying the pipeline. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd` | Trains/evaluates SEC-GFD on cached graphs and appends rows to `runs/<experiment>/results.csv` (with `model_id=secgfd`). Also writes `results_summary_secgfd.csv` (mean/std across training seeds). Requires that `--stage graphs` already ran in the same output directory. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd --only-clean` | SEC-GFD on the clean graph only (fast sanity check). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd --max-training-seeds 1 --max-epochs 20 --patience 5` | SEC-GFD quick-run settings to reduce runtime while verifying the pipeline. |
 
 Notes:
 - If you use `--out` for `--stage graphs`, you must also pass the same `--out` for `--stage baselines` so it can find `graph_variants.csv` and the cached graphs.
 - Same applies to `--stage pmp` (use the same `--out` so it can find the cached graphs and variant ledger).
+- Same applies to `--stage secgfd`.
 - Running `--stage graphs --force` rewrites `results.csv` and will delete any previously-written baseline results. If you do that, re-run `--stage baselines`.
- - If you run `--stage pmp --force`, it rewrites `results.csv` and will delete previously-written rows (including baselines). Re-run baselines afterward if needed.
+- If you run `--stage pmp --force`, it rewrites `results.csv` and will delete previously-written rows (including baselines). Re-run baselines afterward if needed.
+- If you run `--stage secgfd --force`, it rewrites `results.csv` and will delete previously-written rows (including baselines and PMP). Re-run other stages afterward if needed.
 
 ### Output Inspection Commands (Optional)
 
@@ -70,8 +75,10 @@ Notes:
 |---|---|
 | `Get-ChildItem runs\\gfd_robustness_benchmark_v1 -Force` | Lists the top-level outputs for the frozen experiment. |
 | `Get-Content runs\\gfd_robustness_benchmark_v1\\graph_variants.csv -TotalCount 5` | Prints the CSV header and first few variant rows (graph stats ledger). |
-| `Get-Content runs\\gfd_robustness_benchmark_v1\\results.csv -TotalCount 5` | Prints the CSV header and first few results rows (baseline metrics once baselines ran). |
+| `Get-Content runs\\gfd_robustness_benchmark_v1\\results.csv -TotalCount 5` | Prints the CSV header and first few results rows (populated after `--stage baselines` / `--stage pmp` / `--stage secgfd`). |
 | `Get-Content runs\\gfd_robustness_benchmark_v1\\results_summary_baselines.csv -TotalCount 5` | Prints the baseline mean/std summary across training seeds. |
+| `Get-Content runs\\gfd_robustness_benchmark_v1\\results_summary_pmp.csv -TotalCount 5` | Prints the PMP mean/std summary across training seeds. |
+| `Get-Content runs\\gfd_robustness_benchmark_v1\\results_summary_secgfd.csv -TotalCount 5` | Prints the SEC-GFD mean/std summary across training seeds. |
 
 ## Step-by-Step: Create Venv, Run Graph Generation, Explain Outputs
 
@@ -211,7 +218,13 @@ Key files/folders:
   - One row per cached variant with graph stats:
     - node/edge counts, degree summaries, heterophily ratio, label prevalence, etc.
 - `runs/gfd_robustness_benchmark_v1/results.csv`
-  - Per-run metrics rows (baselines now populate this; specialized methods will be appended later).
+  - Per-run metrics rows (baselines + PMP + SEC-GFD append to this file).
+- `runs/gfd_robustness_benchmark_v1/results_summary_baselines.csv`
+  - Mean/std across training seeds for the baselines.
+- `runs/gfd_robustness_benchmark_v1/results_summary_pmp.csv`
+  - Mean/std across training seeds for PMP.
+- `runs/gfd_robustness_benchmark_v1/results_summary_secgfd.csv`
+  - Mean/std across training seeds for SEC-GFD.
 
 ## Troubleshooting
 
@@ -223,7 +236,6 @@ If you see DGL import errors:
 
 ## Next Steps
 
-- `todos/TODO_05_integrate_secgfd.md`: integrate the second specialized method (SEC-GFD).
 - `todos/TODO_06_experiments_and_plots.md`: run the full grid and produce plots for the report.
 
 ## Baselines (MLP + GraphSAGE)

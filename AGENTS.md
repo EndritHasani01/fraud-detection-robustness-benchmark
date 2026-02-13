@@ -44,6 +44,12 @@ PMP stage (specialized method) on cached graphs:
 py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp
 ```
 
+SEC-GFD stage (specialized method) on cached graphs:
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage secgfd
+```
+
 Quick sanity check (clean graph only, first training seed only):
 
 ```bash
@@ -57,6 +63,7 @@ Outputs go to `runs/<experiment_name>/`:
 - `results.csv` (per-run metrics rows; baselines populate this now)
 - `results_summary_baselines.csv` (mean/std across training seeds for baselines)
 - `results_summary_pmp.csv` (mean/std across training seeds for PMP)
+- `results_summary_secgfd.csv` (mean/std across training seeds for SEC-GFD)
 
 `runs/` is ignored by git via `.gitignore`.
 

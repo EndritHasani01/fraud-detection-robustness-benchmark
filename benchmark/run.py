@@ -181,10 +181,11 @@ def main(argv: list[str] | None = None) -> int:
         "--stage",
         type=str,
         default="graphs",
-        choices=["graphs", "baselines", "pmp"],
+        choices=["graphs", "baselines", "pmp", "secgfd"],
         help="Pipeline stage to run. 'graphs' builds splits and caches graph variants; "
         "'baselines' trains/evaluates MLP + GraphSAGE on cached graphs; "
-        "'pmp' trains/evaluates PMP (LA-SAGE-S) from Repos/PMP-master on cached graphs.",
+        "'pmp' trains/evaluates PMP (LA-SAGE-S) from Repos/PMP-master on cached graphs; "
+        "'secgfd' trains/evaluates SEC-GFD from Repos/SEC-GFD-main on cached graphs.",
     )
     p.add_argument("--force", action="store_true", help="Overwrite cached outputs if they exist.")
     p.add_argument("--force-reload", action="store_true", help="Force DGL dataset reload/redownload.")
@@ -198,8 +199,13 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Use at most N training seeds from the config (0 = no limit).",
     )
-    p.add_argument("--max-epochs", type=int, default=0, help="Override baseline max epochs (0 = use defaults).")
-    p.add_argument("--patience", type=int, default=0, help="Override baseline early-stop patience (0 = use defaults).")
+    p.add_argument("--max-epochs", type=int, default=0, help="Override max epochs for training stages (0 = use defaults).")
+    p.add_argument(
+        "--patience",
+        type=int,
+        default=0,
+        help="Override early-stop patience for training stages (0 = use defaults).",
+    )
     args = p.parse_args(argv)
 
     config_path = Path(args.config)
@@ -236,6 +242,21 @@ def main(argv: list[str] | None = None) -> int:
             from .pmp_stage import run_pmp_stage
 
             run_pmp_stage(
+                cfg,
+                out_dir=out_dir,
+                force=bool(args.force),
+                device=str(args.device),
+                include_noop=bool(args.include_noop),
+                only_clean=bool(args.only_clean),
+                max_variants=(None if int(args.max_variants) <= 0 else int(args.max_variants)),
+                max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
+                max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
+                patience=(None if int(args.patience) <= 0 else int(args.patience)),
+            )
+        elif args.stage == "secgfd":
+            from .secgfd_stage import run_secgfd_stage
+
+            run_secgfd_stage(
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),

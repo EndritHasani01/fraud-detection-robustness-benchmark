@@ -11,8 +11,11 @@ import dgl
 class GCN(nn.Module):
     def __init__(self, in_dim, hid_dim, out_dim, g):
         super(GCN, self).__init__()
-        self.conv1 = GraphConv(in_dim, hid_dim)
-        self.conv2 = GraphConv(hid_dim, out_dim)
+        # SEC-GFD uses full graphs where a few nodes may have zero in-degree.
+        # DGL's GraphConv throws by default in that case; allow it so the model
+        # can run on cached benchmark graphs without modifying the graph.
+        self.conv1 = GraphConv(in_dim, hid_dim, allow_zero_in_degree=True)
+        self.conv2 = GraphConv(hid_dim, out_dim, allow_zero_in_degree=True)
         self.act = nn.ReLU()
         self.g = g
 
