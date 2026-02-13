@@ -6,9 +6,67 @@ Core idea:
 - Start from a real fraud graph dataset (YelpChi).
 - Generate controlled "stress-test" graph variants (heterophily, camouflage, noise/density).
 - Cache every graph variant to disk and log graph statistics to a single CSV.
-- Later steps (TODO-03+) will train/evaluate models and write results to `results.csv`.
+- Train/evaluate baseline models (MLP + GraphSAGE) and write results to `results.csv`.
+- Later steps (TODO-04+) integrate specialized methods (PMP, SEC-GFD).
 
 The benchmark runner is in `benchmark/` and the current frozen experiment definition is `configs/exp_yelpchi_v1.json`.
+
+## Run Commands (Complete List)
+
+All commands below assume you are in the repository root:
+`d:\Revolucion\1. Fakulltet\4.1 Semestri\6. Theoretical Graphs\GitHub\fraud-detection-robustness-benchmark`
+
+### Environment Commands
+
+| Command | What it does |
+|---|---|
+| `py -3.11 -m venv .venv` | Creates a Python 3.11 virtual environment in `.venv/`. |
+| `Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force` | PowerShell-only: allows running the activation script in the current shell session. |
+| `. .\.venv\Scripts\Activate.ps1` | Activates the venv for PowerShell (uses the venv's Python and pip). |
+| `.venv\Scripts\activate.bat` | Activates the venv for CMD (alternative to PowerShell). |
+| `deactivate` | Deactivates the venv (returns to your global shell environment). |
+
+### Dependency Install Commands (Run Inside The Activated Venv)
+
+| Command | What it does |
+|---|---|
+| `py -m pip install "numpy<2" scipy` | Installs base numeric dependencies and pins NumPy below 2.0 for wheel compatibility. |
+| `py -m pip install torch==2.3.0+cpu --index-url https://download.pytorch.org/whl/cpu` | Installs CPU-only PyTorch (keeps setup simple on Windows without CUDA). |
+| `py -m pip install https://data.dgl.ai/wheels/dgl-2.2.1-cp311-cp311-win_amd64.whl` | Installs DGL 2.2.1 CPU wheel for Python 3.11 on Windows. |
+| `py -m pip install torchdata==0.8.0 PyYAML pydantic` | Installs packages required by DGL internals on Windows. |
+| `py -c "import torch, dgl; print(torch.__version__); print(dgl.__version__)"` | Quick import check to confirm the ML stack loads correctly. |
+
+### Benchmark Runner Commands
+
+| Command | What it does |
+|---|---|
+| `py -m benchmark.run --help` | Shows all available stages and CLI flags. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage graphs` | Builds the fixed split and caches the base graph + all stress-test variants defined in the config. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage graphs --force` | Same as above, but overwrites cached graph outputs and rewrites CSV headers. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage graphs --force-reload` | Forces DGL to reload/redownload the dataset artifacts. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage graphs --out runs\\my_run` | Writes outputs to a custom directory instead of `runs/<experiment_name>/`. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines` | Trains/evaluates `mlp` + `sage` on cached graphs and appends rows to `runs/<experiment>/results.csv`. Also writes `results_summary_baselines.csv` (mean/std across training seeds). Requires that `--stage graphs` already ran in the same output directory. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --only-clean` | Baselines on the clean graph only (fast sanity check). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --include-noop` | Also evaluates no-op scenario rows (severity 0.0). Normally you do not need this because the `clean` row already covers the unperturbed graph. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --force` | Overwrites `runs/<experiment>/results.csv` before writing new baseline results (useful for a clean rerun). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --max-variants 10` | Evaluates at most N variant rows from `graph_variants.csv` (useful for quick smoke tests). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --max-training-seeds 1` | Uses only the first N training seeds from the config (useful to reduce runtime). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --max-epochs 50 --patience 5` | Overrides baseline training loop settings (max epochs and early stopping patience). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --device cpu` | Runs baselines on CPU (recommended for this repo's pinned CPU DGL wheel). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --device cuda` | Attempts CUDA training; if the environment/graph backend does not support it, the code falls back to CPU. |
+
+Notes:
+- If you use `--out` for `--stage graphs`, you must also pass the same `--out` for `--stage baselines` so it can find `graph_variants.csv` and the cached graphs.
+- Running `--stage graphs --force` rewrites `results.csv` and will delete any previously-written baseline results. If you do that, re-run `--stage baselines`.
+
+### Output Inspection Commands (Optional)
+
+| Command | What it does |
+|---|---|
+| `Get-ChildItem runs\\gfd_robustness_benchmark_v1 -Force` | Lists the top-level outputs for the frozen experiment. |
+| `Get-Content runs\\gfd_robustness_benchmark_v1\\graph_variants.csv -TotalCount 5` | Prints the CSV header and first few variant rows (graph stats ledger). |
+| `Get-Content runs\\gfd_robustness_benchmark_v1\\results.csv -TotalCount 5` | Prints the CSV header and first few results rows (baseline metrics once baselines ran). |
+| `Get-Content runs\\gfd_robustness_benchmark_v1\\results_summary_baselines.csv -TotalCount 5` | Prints the baseline mean/std summary across training seeds. |
 
 ## Step-by-Step: Create Venv, Run Graph Generation, Explain Outputs
 
@@ -95,7 +153,7 @@ What this command does (ordered, detailed, matching the code path):
 2. Creates the output directory (default: `runs/<experiment_name>/`, or `--out` if provided).
 3. Copies the config to `runs/<experiment_name>/config.json` for reproducibility.
 4. Creates (or overwrites) CSV files:
-   - `runs/<experiment_name>/results.csv` (schema only until training is implemented)
+   - `runs/<experiment_name>/results.csv` (header; populated by `--stage baselines` and later stages)
    - `runs/<experiment_name>/graph_variants.csv` (one row per cached variant + graph stats)
 5. Loads the raw dataset via DGL into `runs/<experiment_name>/data/dgl/`.
    - If you see `Done loading data from cached files.`, it means DGL found the dataset already downloaded/cached.
@@ -148,7 +206,7 @@ Key files/folders:
   - One row per cached variant with graph stats:
     - node/edge counts, degree summaries, heterophily ratio, label prevalence, etc.
 - `runs/gfd_robustness_benchmark_v1/results.csv`
-  - Results schema (metrics columns exist but stay empty until TODO-03+ integrates training/evaluation).
+  - Per-run metrics rows (baselines now populate this; specialized methods will be appended later).
 
 ## Troubleshooting
 
@@ -161,7 +219,7 @@ If you see DGL import errors:
 ## Next Steps
 
 - `todos/TODO_04_integrate_pmp.md` and `todos/TODO_05_integrate_secgfd.md`: integrate the two specialized methods.
- - `todos/TODO_06_experiments_and_plots.md`: run the full grid and produce plots for the report.
+- `todos/TODO_06_experiments_and_plots.md`: run the full grid and produce plots for the report.
 
 ## Baselines (MLP + GraphSAGE)
 

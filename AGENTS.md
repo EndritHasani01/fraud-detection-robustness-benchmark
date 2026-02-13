@@ -26,17 +26,30 @@ The main goal is to provide a small, reproducible evaluation harness that can:
 
 ## How To Run (Current State)
 
-Graphs + caching stage (no model training yet):
+Graphs + caching stage (builds split + caches base and perturbed graphs):
 
 ```bash
 py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage graphs
+```
+
+Baselines stage (MLP + GraphSAGE) on cached graphs:
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines
+```
+
+Quick sanity check (clean graph only, first training seed only):
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --only-clean --max-training-seeds 1
 ```
 
 Outputs go to `runs/<experiment_name>/`:
 - `config.json` (config snapshot)
 - `graphs/` (cached base + variant graphs)
 - `graph_variants.csv` (ledger + graph stats)
-- `results.csv` (schema only until models are integrated)
+- `results.csv` (per-run metrics rows; baselines populate this now)
+- `results_summary_baselines.csv` (mean/std across training seeds for baselines)
 
 `runs/` is ignored by git via `.gitignore`.
 
@@ -60,4 +73,3 @@ Outputs go to `runs/<experiment_name>/`:
 - Prefer small, focused commits/patches (even if you do not commit, keep diffs reviewable).
 - Do not add heavy tooling (formatters/lint frameworks) unless the repo already uses them.
 - Avoid touching files in `Repos/` unless necessary for integration or correctness.
-
