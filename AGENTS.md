@@ -38,6 +38,12 @@ Baselines stage (MLP + GraphSAGE) on cached graphs:
 py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines
 ```
 
+PMP stage (specialized method) on cached graphs:
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp
+```
+
 Quick sanity check (clean graph only, first training seed only):
 
 ```bash
@@ -50,6 +56,7 @@ Outputs go to `runs/<experiment_name>/`:
 - `graph_variants.csv` (ledger + graph stats)
 - `results.csv` (per-run metrics rows; baselines populate this now)
 - `results_summary_baselines.csv` (mean/std across training seeds for baselines)
+- `results_summary_pmp.csv` (mean/std across training seeds for PMP)
 
 `runs/` is ignored by git via `.gitignore`.
 

@@ -1,9 +1,27 @@
 import torch.nn as nn
 import torch
-from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm
 from torch import Tensor
 import math
 from torch.nn import functional as F
+
+try:
+    from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm
+except Exception:  # pragma: no cover
+    # PMP optionally uses PyG normalization layers. For this benchmark we avoid
+    # a hard dependency on torch_geometric by providing identity fallbacks.
+    class GraphNorm(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def forward(self, x):
+            return x
+
+    class GraphSizeNorm(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def forward(self, x):
+            return x
 
 class Seq(nn.Module):
     ''' 

@@ -181,9 +181,10 @@ def main(argv: list[str] | None = None) -> int:
         "--stage",
         type=str,
         default="graphs",
-        choices=["graphs", "baselines"],
+        choices=["graphs", "baselines", "pmp"],
         help="Pipeline stage to run. 'graphs' builds splits and caches graph variants; "
-        "'baselines' trains/evaluates MLP + GraphSAGE on cached graphs.",
+        "'baselines' trains/evaluates MLP + GraphSAGE on cached graphs; "
+        "'pmp' trains/evaluates PMP (LA-SAGE-S) from Repos/PMP-master on cached graphs.",
     )
     p.add_argument("--force", action="store_true", help="Overwrite cached outputs if they exist.")
     p.add_argument("--force-reload", action="store_true", help="Force DGL dataset reload/redownload.")
@@ -220,6 +221,21 @@ def main(argv: list[str] | None = None) -> int:
             from .baselines_stage import run_baselines_stage
 
             run_baselines_stage(
+                cfg,
+                out_dir=out_dir,
+                force=bool(args.force),
+                device=str(args.device),
+                include_noop=bool(args.include_noop),
+                only_clean=bool(args.only_clean),
+                max_variants=(None if int(args.max_variants) <= 0 else int(args.max_variants)),
+                max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
+                max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
+                patience=(None if int(args.patience) <= 0 else int(args.patience)),
+            )
+        elif args.stage == "pmp":
+            from .pmp_stage import run_pmp_stage
+
+            run_pmp_stage(
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),

@@ -9,9 +9,28 @@ import math
 from dgl.utils import check_eq_shape, expand_as_pair
 from dgl.utils import check_eq_shape, expand_as_pair
 from dgl.base import DGLError
-from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm
 from torch import Tensor
 from .base import MLP
+
+try:
+    from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm
+except Exception:  # pragma: no cover
+    # PMP optionally uses PyG normalization layers. For this benchmark we avoid
+    # a hard dependency on torch_geometric by providing identity fallbacks.
+    class GraphNorm(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def forward(self, x):
+            return x
+
+    class GraphSizeNorm(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+        def forward(self, x):
+            return x
+
 class LISeq(nn.Module):
     ''' 
     An extension of nn.Sequential. 

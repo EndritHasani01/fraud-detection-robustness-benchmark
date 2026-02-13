@@ -1,0 +1,585 @@
+from __future__ import annotations
+
+import csv
+import math
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .metrics import average_precision_binary, best_f1_macro_threshold, f1_macro_at_threshold, roc_auc_binary
+from .results import RESULTS_COLUMNS, append_csv_row, ensure_csv_header
+from .summarize import summarize_results_by_training_seed
+
+
+@dataclass(frozen=True)
+class VariantRow:
+    experiment_name: str
+    dataset_id: str
+    split_id: str
+    graph_seed: int
+    scenario_id: str
+    severity: float
+    oracle_labels: bool
+    scenario_applied: bool
+    base_graph_path: str
+    graph_path: str
+    # graph stats copied from graph_variants.csv
+    n_nodes: int
+    n_edges: int
+    mean_in_degree: float
+    median_in_degree: float
+    mean_out_degree: float
+    median_out_degree: float
+    heterophily_ratio: float | None
+    pos_rate: float | None
+
+
+def _parse_bool(x: Any) -> bool:
+    if isinstance(x, bool):
+        return bool(x)
+    s = str(x).strip().lower()
+    return s in {"1", "true", "t", "yes", "y"}
+
+
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        return int(float(x))
+    except Exception:
+        return int(default)
+
+
+def _safe_float(x: Any, default: float | None = None) -> float | None:
+    try:
+        return float(x)
+    except Exception:
+        return default
+
+
+def _read_variants_csv(path: Path) -> list[VariantRow]:
+    if not path.exists():
+        raise FileNotFoundError(f"graph_variants.csv not found: {path}")
+
+    rows: list[VariantRow] = []
+    with path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            rows.append(
+                VariantRow(
+                    experiment_name=str(r.get("experiment_name", "")),
+                    dataset_id=str(r.get("dataset_id", "")),
+                    split_id=str(r.get("split_id", "")),
+                    graph_seed=_safe_int(r.get("graph_seed", 0)),
+                    scenario_id=str(r.get("scenario_id", "")),
+                    severity=float(r.get("severity", 0.0) or 0.0),
+                    oracle_labels=_parse_bool(r.get("oracle_labels", False)),
+                    scenario_applied=_parse_bool(r.get("scenario_applied", True)),
+                    base_graph_path=str(r.get("base_graph_path", "")),
+                    graph_path=str(r.get("graph_path", "")),
+                    n_nodes=_safe_int(r.get("n_nodes", 0)),
+                    n_edges=_safe_int(r.get("n_edges", 0)),
+                    mean_in_degree=float(r.get("mean_in_degree", 0.0) or 0.0),
+                    median_in_degree=float(r.get("median_in_degree", 0.0) or 0.0),
+                    mean_out_degree=float(r.get("mean_out_degree", 0.0) or 0.0),
+                    median_out_degree=float(r.get("median_out_degree", 0.0) or 0.0),
+                    heterophily_ratio=_safe_float(r.get("heterophily_ratio", ""), None),
+                    pos_rate=_safe_float(r.get("pos_rate", ""), None),
+                )
+            )
+    return rows
+
+
+def _set_seeds(seed: int) -> None:
+    import random
+
+    import numpy as np
+    import torch
+
+    random.seed(int(seed))
+    np.random.seed(int(seed))
+    torch.manual_seed(int(seed))
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(int(seed))
+
+    try:
+        import dgl
+
+        dgl.seed(int(seed))
+        dgl.random.seed(int(seed))
+    except Exception:
+        pass
+
+
+def _load_graph_bin(path: Path):
+    try:
+        from dgl.data.utils import load_graphs
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError("DGL is required to load cached graphs for PMP evaluation.") from e
+
+    graphs, _ = load_graphs(str(path))
+    if not graphs:
+        raise RuntimeError(f"No graphs found in file: {path}")
+    return graphs[0]
+
+
+def _row_normalize_features(x, *, eps: float = 0.01):
+    import torch
+
+    denom = x.sum(dim=1, keepdim=True) + float(eps)
+    return x / denom
+
+
+def _ensure_label_unk(g, *, label_key: str = "label") -> None:
+    """Create PMP's label_unk encoding: 0/1 for train nodes, 2 for all others."""
+    import torch
+
+    y = g.ndata.get(label_key)
+    if y is None:
+        raise RuntimeError(f"Graph missing ndata['{label_key}']")
+    y = y.squeeze().to(torch.int64)
+
+    train_mask = g.ndata.get("train_mask")
+    if train_mask is None:
+        raise RuntimeError("Graph missing ndata['train_mask']")
+
+    label_unk = torch.full((g.num_nodes(),), 2, dtype=torch.int64)
+    train_idx = torch.nonzero(train_mask, as_tuple=True)[0]
+    label_unk[train_idx] = y[train_idx]
+    g.ndata["label_unk"] = label_unk
+
+
+def _import_pmp_model(repo_root: Path):
+    repo_root = repo_root.resolve()
+    if not repo_root.exists():
+        raise FileNotFoundError(f"PMP repo not found: {repo_root}")
+
+    # Ensure we can `import model.LASAGE_S` from the research repo.
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    try:
+        from model.LASAGE_S import LASAGE_S  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(
+            "Failed to import PMP model from Repos/PMP-master. "
+            "If this is a dependency issue, install missing packages or patch the repo as needed."
+        ) from e
+    return LASAGE_S
+
+
+def _load_pmp_yaml_config(repo_root: Path, *, dataset_source_name: str, model_name: str = "LA-SAGE-S") -> dict[str, Any]:
+    try:
+        import yaml
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError("PyYAML is required to load PMP configs.") from e
+
+    yml = repo_root / "config" / f"{dataset_source_name}.yml"
+    if not yml.exists():
+        raise FileNotFoundError(f"PMP config not found: {yml}")
+
+    cfg_all = yaml.safe_load(yml.read_text(encoding="utf-8"))
+    if model_name not in cfg_all:
+        raise KeyError(f"Model '{model_name}' not found in {yml.name}")
+    cfg = dict(cfg_all[model_name])
+    cfg["dataset"] = cfg_all.get("dataset", dataset_source_name)
+    cfg["model_name"] = model_name
+    return cfg
+
+
+def _class_weights_from_train_labels(y_train):
+    import torch
+
+    y_train = y_train.to(torch.int64)
+    n_pos = int((y_train == 1).sum().item())
+    n_neg = int((y_train == 0).sum().item())
+    if n_pos <= 0 or n_neg <= 0:
+        return None
+    w0 = 1.0
+    w1 = float(n_neg) / float(n_pos)
+    return torch.tensor([w0, w1], dtype=torch.float32)
+
+
+def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any]):
+    import torch
+    from dgl.dataloading import DataLoader, MultiLayerFullNeighborSampler, NeighborSampler
+
+    n_layer = int(cfg_pmp.get("n_layer", 1))
+    batch_size = int(cfg_pmp.get("batch_size", 512))
+    val_batch_size = int(cfg_pmp.get("val_batch_size", batch_size))
+    test_batch_size = int(cfg_pmp.get("test_batch_size", batch_size))
+
+    full_neighbors = bool(cfg_pmp.get("full_neighbors", True))
+    sampled_neighbors = cfg_pmp.get("sampled_neighbors", [-1] * n_layer)
+    if isinstance(sampled_neighbors, list):
+        fanouts = [int(sampled_neighbors[i]) for i in range(min(len(sampled_neighbors), n_layer))]
+        if len(fanouts) < n_layer:
+            fanouts = fanouts + [-1] * (n_layer - len(fanouts))
+    else:
+        fanouts = [-1] * n_layer
+
+    prefetch_node_feats = ["feature", "label_unk"]
+    prefetch_labels = ["label"]
+
+    if full_neighbors:
+        sampler = MultiLayerFullNeighborSampler(
+            n_layer, prefetch_node_feats=prefetch_node_feats, prefetch_labels=prefetch_labels
+        )
+    else:
+        sampler = NeighborSampler(
+            fanouts,
+            edge_dir=str(cfg_pmp.get("sampling_type", "in")),
+            prefetch_node_feats=prefetch_node_feats,
+            prefetch_labels=prefetch_labels,
+        )
+
+    # On Windows, keep num_workers=0 for stability.
+    train_loader = DataLoader(
+        g,
+        train_idx,
+        sampler,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False,
+        num_workers=0,
+    )
+    val_loader = DataLoader(
+        g,
+        val_idx,
+        sampler,
+        batch_size=val_batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=0,
+    )
+    test_loader = DataLoader(
+        g,
+        test_idx,
+        sampler,
+        batch_size=test_batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=0,
+    )
+
+    return train_loader, val_loader, test_loader
+
+
+def _predict_probs(model, relations, loader, *, device: str):
+    import numpy as np
+    import torch
+    import torch.nn.functional as F
+
+    model.eval()
+    y_true_parts = []
+    y_score_parts = []
+
+    with torch.no_grad():
+        for _input_nodes, _output_nodes, blocks in loader:
+            blocks = [b.to(device) for b in blocks]
+            feats = blocks[0].srcdata["feature"].to(device)
+            logits = model(blocks, relations, feats)
+            probs = F.softmax(logits, dim=1)[:, 1]
+            y = blocks[-1].dstdata["label"].to(device).squeeze().to(torch.int64)
+
+            y_true_parts.append(y.detach().cpu().numpy())
+            y_score_parts.append(probs.detach().cpu().numpy())
+
+    y_true = np.concatenate(y_true_parts, axis=0) if y_true_parts else np.array([], dtype=np.int64)
+    y_score = np.concatenate(y_score_parts, axis=0) if y_score_parts else np.array([], dtype=np.float64)
+    return y_true, y_score
+
+
+def train_eval_pmp(
+    g,
+    *,
+    repo_root: Path,
+    cfg_pmp: dict[str, Any],
+    training_seed: int,
+    device: str,
+    max_epochs: int | None,
+    patience: int | None,
+) -> dict[str, Any]:
+    import copy
+
+    import torch
+
+    t0 = time.perf_counter()
+    _set_seeds(int(training_seed))
+
+    if device not in {"cpu", "cuda"}:
+        raise ValueError("device must be 'cpu' or 'cuda'")
+    if device == "cuda" and not torch.cuda.is_available():
+        device = "cpu"
+
+    orig_x = g.ndata.get("feature")
+    if orig_x is None:
+        raise RuntimeError("Graph missing ndata['feature']")
+
+    try:
+        # PMP code path expects this helper label encoding.
+        _ensure_label_unk(g)
+
+        # PMP's official config row-normalizes features; apply per-run to the loaded graph only.
+        if bool(cfg_pmp.get("norm_feat", True)):
+            g.ndata["feature"] = _row_normalize_features(orig_x.to(torch.float32)).to(torch.float32)
+
+        train_mask = g.ndata.get("train_mask")
+        val_mask = g.ndata.get("val_mask")
+        test_mask = g.ndata.get("test_mask")
+        if train_mask is None or val_mask is None or test_mask is None:
+            raise RuntimeError("Graph is missing train/val/test masks.")
+
+        train_idx = torch.nonzero(train_mask, as_tuple=True)[0]
+        val_idx = torch.nonzero(val_mask, as_tuple=True)[0]
+        test_idx = torch.nonzero(test_mask, as_tuple=True)[0]
+
+        train_loader, val_loader, test_loader = _make_dataloaders(
+            g, train_idx=train_idx, val_idx=val_idx, test_idx=test_idx, cfg_pmp=cfg_pmp
+        )
+
+        LASAGE_S = _import_pmp_model(repo_root)
+
+        feat_dim = int(g.ndata["feature"].shape[1])
+        y = g.ndata["label"].squeeze().to(torch.int64)
+        num_classes = int(torch.unique(y).numel())
+        relations = list(getattr(g, "etypes", []))
+        num_relations = max(1, len(relations))
+
+        mlp_act = str(cfg_pmp.get("mlp_activation", "relu")).lower()
+        if mlp_act == "elu":
+            mlp_activation = torch.nn.ELU(inplace=True)
+        else:
+            mlp_activation = torch.nn.ReLU(inplace=True)
+
+        proj = bool(cfg_pmp.get("proj", True))
+        hid_dim = int(cfg_pmp.get("hid_dim", 48))
+        n_layer = int(cfg_pmp.get("n_layer", 1))
+        dropout = float(cfg_pmp.get("dropout", 0.0))
+        num_trans = int(cfg_pmp.get("num_trans", 1))
+        agg = str(cfg_pmp.get("agg", "mean"))
+        relation_agg = str(cfg_pmp.get("relation_agg", "cat"))
+
+        model = LASAGE_S(
+            in_size=feat_dim,
+            hid_size=hid_dim,
+            out_size=(num_classes if not proj else hid_dim),
+            num_layers=n_layer,
+            dropout=dropout,
+            proj=proj,
+            num_relations=num_relations,
+            batch_size=int(cfg_pmp.get("batch_size", 512)),
+            num_trans=num_trans,
+            mlp_activation=mlp_activation,
+            out_proj_size=num_classes,
+            agg=agg,
+            relation_agg=relation_agg,
+        )
+
+        # If the environment cannot move blocks/graph to CUDA (e.g., CPU-only DGL wheel), fall back to CPU.
+        if device == "cuda":
+            try:
+                model = model.to("cuda")
+            except Exception:
+                device = "cpu"
+                model = model.to("cpu")
+        else:
+            model = model.to("cpu")
+
+        lr = float(cfg_pmp.get("lr", 0.01))
+        weight_decay = float(cfg_pmp.get("weight_decay", 0.0))
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+        y_train = y[train_idx]
+        class_w = _class_weights_from_train_labels(y_train)
+        if class_w is not None:
+            class_w = class_w.to(device)
+
+        loss_fn = torch.nn.CrossEntropyLoss(weight=class_w if bool(cfg_pmp.get("weighted_loss", False)) else None)
+
+        epochs = int(cfg_pmp.get("epochs", 100))
+        if max_epochs is not None:
+            epochs = int(max_epochs)
+        es_patience = int(cfg_pmp.get("patience", 10))
+        if patience is not None:
+            es_patience = int(patience)
+
+        best_monitor = -float("inf")
+        best_state = None
+        bad_epochs = 0
+
+        for _epoch in range(epochs):
+            model.train()
+            for _in_nodes, _out_nodes, blocks in train_loader:
+                blocks = [b.to(device) for b in blocks]
+                feats = blocks[0].srcdata["feature"].to(device)
+                labels = blocks[-1].dstdata["label"].to(device).squeeze().to(torch.int64)
+
+                logits = model(blocks, relations, feats)
+                loss = loss_fn(logits, labels)
+
+                opt.zero_grad(set_to_none=True)
+                loss.backward()
+                opt.step()
+
+            # Validation monitor: ROC-AUC on val probabilities.
+            y_val, s_val = _predict_probs(model, relations, val_loader, device=device)
+            val_auc = roc_auc_binary(y_val, s_val)
+            monitor = float(val_auc) if math.isfinite(val_auc) else -float("inf")
+
+            if monitor > best_monitor:
+                best_monitor = monitor
+                best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+                if es_patience > 0 and bad_epochs >= es_patience:
+                    break
+
+        if best_state is not None:
+            model.load_state_dict(best_state)
+
+        y_val, s_val = _predict_probs(model, relations, val_loader, device=device)
+        th = best_f1_macro_threshold(y_val, s_val)
+
+        y_test, s_test = _predict_probs(model, relations, test_loader, device=device)
+        roc_auc = roc_auc_binary(y_test, s_test)
+        ap = average_precision_binary(y_test, s_test)
+        f1m = f1_macro_at_threshold(y_test, s_test, th.threshold)
+
+        dt = time.perf_counter() - t0
+        return {
+            "roc_auc": float(roc_auc) if roc_auc is not None else float("nan"),
+            "average_precision": float(ap) if ap is not None else float("nan"),
+            "f1_macro": float(f1m),
+            "threshold": float(th.threshold),
+            "duration_sec": float(dt),
+        }
+    finally:
+        # Restore features so repeated runs on the same loaded graph are stable.
+        g.ndata["feature"] = orig_x
+
+
+def run_pmp_stage(
+    cfg: dict[str, Any],
+    *,
+    out_dir: Path,
+    force: bool,
+    device: str,
+    include_noop: bool,
+    only_clean: bool,
+    max_variants: int | None,
+    max_training_seeds: int | None,
+    max_epochs: int | None,
+    patience: int | None,
+) -> None:
+    out_dir = out_dir.resolve()
+    results_csv = out_dir / "results.csv"
+    variants_csv = out_dir / "graph_variants.csv"
+
+    ensure_csv_header(results_csv, RESULTS_COLUMNS, overwrite=bool(force))
+
+    variants = _read_variants_csv(variants_csv)
+    if not variants:
+        raise RuntimeError(f"No rows found in {variants_csv}")
+
+    dataset_cfg_by_id = {d["dataset_id"]: d for d in cfg.get("datasets", [])}
+
+    # Find PMP repo path in config.
+    pmp_model_cfg = None
+    for m in cfg.get("models", []):
+        if str(m.get("model_id", "")) == "pmp":
+            pmp_model_cfg = m
+            break
+    if not pmp_model_cfg:
+        raise RuntimeError("Config has no model entry with model_id='pmp'")
+
+    repo_root = Path(str(pmp_model_cfg.get("repo_path", "")))
+    if not repo_root.exists():
+        raise FileNotFoundError(f"Configured PMP repo_path does not exist: {repo_root}")
+
+    training_seeds = [int(s) for s in cfg["seeds"]["training_seeds"]]
+    if max_training_seeds is not None:
+        training_seeds = training_seeds[: int(max_training_seeds)]
+
+    # Filter variant rows.
+    filtered: list[VariantRow] = []
+    for v in variants:
+        if only_clean and v.scenario_id != "clean":
+            continue
+        if (not include_noop) and (not v.scenario_applied) and v.scenario_id != "clean":
+            continue
+        filtered.append(v)
+
+    if max_variants is not None:
+        filtered = filtered[: int(max_variants)]
+
+    for v in filtered:
+        ds_cfg = dataset_cfg_by_id.get(v.dataset_id, {})
+        dataset_source_name = str(ds_cfg.get("source_name", "yelp")).strip().lower()
+        cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name="LA-SAGE-S")
+
+        g = _load_graph_bin(Path(v.graph_path))
+
+        for training_seed in training_seeds:
+            row_common = {
+                "experiment_name": v.experiment_name,
+                "dataset_id": v.dataset_id,
+                "split_id": v.split_id,
+                "graph_seed": int(v.graph_seed),
+                "training_seed": int(training_seed),
+                "scenario_id": v.scenario_id,
+                "severity": float(v.severity),
+                "model_id": "pmp",
+                "n_nodes": int(v.n_nodes),
+                "n_edges": int(v.n_edges),
+                "mean_in_degree": float(v.mean_in_degree),
+                "median_in_degree": float(v.median_in_degree),
+                "mean_out_degree": float(v.mean_out_degree),
+                "median_out_degree": float(v.median_out_degree),
+                "heterophily_ratio": v.heterophily_ratio,
+                "pos_rate": v.pos_rate,
+                "base_graph_path": v.base_graph_path,
+                "graph_path": v.graph_path,
+            }
+
+            try:
+                out = train_eval_pmp(
+                    g,
+                    repo_root=repo_root,
+                    cfg_pmp=cfg_pmp,
+                    training_seed=int(training_seed),
+                    device=str(device),
+                    max_epochs=max_epochs,
+                    patience=patience,
+                )
+                append_csv_row(
+                    results_csv,
+                    RESULTS_COLUMNS,
+                    {
+                        **row_common,
+                        "roc_auc": out["roc_auc"],
+                        "average_precision": out["average_precision"],
+                        "f1_macro": out["f1_macro"],
+                        "threshold": out["threshold"],
+                        "duration_sec": out["duration_sec"],
+                        "status": "ok",
+                        "error": "",
+                    },
+                )
+            except Exception as e:
+                append_csv_row(
+                    results_csv,
+                    RESULTS_COLUMNS,
+                    {
+                        **row_common,
+                        "status": "error",
+                        "error": str(e),
+                    },
+                )
+
+    summarize_results_by_training_seed(
+        results_csv,
+        out_csv_path=out_dir / "results_summary_pmp.csv",
+        model_ids={"pmp"},
+    )

@@ -1,6 +1,19 @@
-# TODO 04: Integrate PMP (Specialized Method 1)
+# TODO 04: Integrate PMP (Specialized Method 1) (Implemented)
 
 Goal: run PMP from `Repos/PMP-master/` inside the benchmark so it can be evaluated on the same cached graph variants.
+
+Implemented artifacts:
+- PMP evaluation stage: `benchmark/pmp_stage.py`
+  - Runner integration: `benchmark/run.py` supports `--stage pmp`
+  - Writes per-run rows to: `runs/<experiment>/results.csv` with `model_id=pmp`
+  - Writes mean/std summary (across training seeds) to: `runs/<experiment>/results_summary_pmp.csv`
+- Minimal PMP repo patch to avoid a hard dependency on `torch_geometric`:
+  - `Repos/PMP-master/model/base.py` (GraphNorm fallback)
+  - `Repos/PMP-master/model/LASAGE_S.py` (GraphNorm fallback)
+
+Integration strategy used:
+- The benchmark loads each cached `graph.bin` directly (from `graph_variants.csv`), constructs PMP's required `label_unk` field from `train_mask`, and trains/evaluates PMP using the official PMP model implementation (`LA-SAGE-S`) from `Repos/PMP-master/`.
+- This avoids re-splitting data inside the research repo and guarantees the same split masks and the same perturbed graphs as the baselines.
 
 Work:
 - Decide the integration strategy:
@@ -24,3 +37,13 @@ Done when:
 Notes:
 - Keep code changes inside `Repos/PMP-master/` minimal and documented. The final report should state any patches you made to run it fairly.
 
+How to run (after `--stage graphs` has produced cached graphs):
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp
+```
+
+Useful flags:
+- `--only-clean` runs PMP only on the clean graph (fast sanity check).
+- `--max-training-seeds N` reduces runtime by using only the first N training seeds.
+- `--max-epochs E --patience P` overrides PMP training loop settings for quicker experiments.

@@ -54,10 +54,15 @@ All commands below assume you are in the repository root:
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --max-epochs 50 --patience 5` | Overrides baseline training loop settings (max epochs and early stopping patience). |
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --device cpu` | Runs baselines on CPU (recommended for this repo's pinned CPU DGL wheel). |
 | `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --device cuda` | Attempts CUDA training; if the environment/graph backend does not support it, the code falls back to CPU. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp` | Trains/evaluates PMP (LA-SAGE-S) on cached graphs and appends rows to `runs/<experiment>/results.csv` (with `model_id=pmp`). Also writes `results_summary_pmp.csv` (mean/std across training seeds). Requires that `--stage graphs` already ran in the same output directory. |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp --only-clean` | PMP on the clean graph only (fast sanity check). |
+| `py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage pmp --max-training-seeds 1 --max-epochs 20 --patience 5` | PMP quick-run settings to reduce runtime while verifying the pipeline. |
 
 Notes:
 - If you use `--out` for `--stage graphs`, you must also pass the same `--out` for `--stage baselines` so it can find `graph_variants.csv` and the cached graphs.
+- Same applies to `--stage pmp` (use the same `--out` so it can find the cached graphs and variant ledger).
 - Running `--stage graphs --force` rewrites `results.csv` and will delete any previously-written baseline results. If you do that, re-run `--stage baselines`.
+ - If you run `--stage pmp --force`, it rewrites `results.csv` and will delete previously-written rows (including baselines). Re-run baselines afterward if needed.
 
 ### Output Inspection Commands (Optional)
 
@@ -218,7 +223,7 @@ If you see DGL import errors:
 
 ## Next Steps
 
-- `todos/TODO_04_integrate_pmp.md` and `todos/TODO_05_integrate_secgfd.md`: integrate the two specialized methods.
+- `todos/TODO_05_integrate_secgfd.md`: integrate the second specialized method (SEC-GFD).
 - `todos/TODO_06_experiments_and_plots.md`: run the full grid and produce plots for the report.
 
 ## Baselines (MLP + GraphSAGE)
