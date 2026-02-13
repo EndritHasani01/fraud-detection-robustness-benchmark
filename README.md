@@ -160,5 +160,22 @@ If you see DGL import errors:
 
 ## Next Steps
 
-- `todos/TODO_03_baselines.md`: implement MLP + baseline GNN training and populate `results.csv`.
 - `todos/TODO_04_integrate_pmp.md` and `todos/TODO_05_integrate_secgfd.md`: integrate the two specialized methods.
+ - `todos/TODO_06_experiments_and_plots.md`: run the full grid and produce plots for the report.
+
+## Baselines (MLP + GraphSAGE)
+
+Once you have cached graphs, you can train/evaluate the baselines and write rows into `runs/<experiment>/results.csv`:
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines
+```
+
+Sanity-check on only the clean graph:
+
+```bash
+py -m benchmark.run --config configs/exp_yelpchi_v1.json --stage baselines --only-clean
+```
+
+After the run, a mean/std summary across training seeds is written to:
+- `runs/gfd_robustness_benchmark_v1/results_summary_baselines.csv`

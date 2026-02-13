@@ -181,11 +181,24 @@ def main(argv: list[str] | None = None) -> int:
         "--stage",
         type=str,
         default="graphs",
-        choices=["graphs"],
-        help="Pipeline stage to run. 'graphs' builds splits and caches graph variants.",
+        choices=["graphs", "baselines"],
+        help="Pipeline stage to run. 'graphs' builds splits and caches graph variants; "
+        "'baselines' trains/evaluates MLP + GraphSAGE on cached graphs.",
     )
     p.add_argument("--force", action="store_true", help="Overwrite cached outputs if they exist.")
     p.add_argument("--force-reload", action="store_true", help="Force DGL dataset reload/redownload.")
+    p.add_argument("--device", type=str, default="cpu", help="Device for model training ('cpu' or 'cuda').")
+    p.add_argument("--include-noop", action="store_true", help="Include no-op scenario rows (severity==0) in evaluation.")
+    p.add_argument("--only-clean", action="store_true", help="Evaluate only the single clean base graph row.")
+    p.add_argument("--max-variants", type=int, default=0, help="Evaluate at most N variant rows (0 = no limit).")
+    p.add_argument(
+        "--max-training-seeds",
+        type=int,
+        default=0,
+        help="Use at most N training seeds from the config (0 = no limit).",
+    )
+    p.add_argument("--max-epochs", type=int, default=0, help="Override baseline max epochs (0 = use defaults).")
+    p.add_argument("--patience", type=int, default=0, help="Override baseline early-stop patience (0 = use defaults).")
     args = p.parse_args(argv)
 
     config_path = Path(args.config)
@@ -203,6 +216,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.stage == "graphs":
             _graphs_only(cfg, out_dir=out_dir, force=bool(args.force), force_reload=bool(args.force_reload))
+        elif args.stage == "baselines":
+            from .baselines_stage import run_baselines_stage
+
+            run_baselines_stage(
+                cfg,
+                out_dir=out_dir,
+                force=bool(args.force),
+                device=str(args.device),
+                include_noop=bool(args.include_noop),
+                only_clean=bool(args.only_clean),
+                max_variants=(None if int(args.max_variants) <= 0 else int(args.max_variants)),
+                max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
+                max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
+                patience=(None if int(args.patience) <= 0 else int(args.patience)),
+            )
         else:
             raise RuntimeError(f"Unknown stage: {args.stage}")
     except Exception as e:
