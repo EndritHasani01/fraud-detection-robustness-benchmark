@@ -204,6 +204,28 @@ def _load_pmp_yaml_config(repo_root: Path, *, dataset_source_name: str, model_na
     return cfg
 
 
+def resolve_pmp_config(
+    repo_root: Path,
+    *,
+    dataset_source_name: str,
+    model_cfg: dict[str, Any] | None,
+    model_name: str = "LA-SAGE-S",
+) -> dict[str, Any]:
+    cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name=model_name)
+    if model_cfg is None:
+        return cfg_pmp
+
+    raw_hparams = model_cfg.get("hparams")
+    if raw_hparams is None:
+        return cfg_pmp
+    if not isinstance(raw_hparams, dict):
+        raise RuntimeError("pmp model config hparams must be an object")
+
+    resolved = dict(cfg_pmp)
+    resolved.update(raw_hparams)
+    return resolved
+
+
 def _class_weights_from_train_labels(y_train):
     import torch
 
@@ -217,14 +239,26 @@ def _class_weights_from_train_labels(y_train):
     return torch.tensor([w0, w1], dtype=torch.float32)
 
 
+def _resolve_pmp_num_workers(cfg_pmp: dict[str, Any]) -> int:
+    if sys.platform.startswith("win"):
+        return 0
+
+    raw = cfg_pmp.get("num_workers", 0)
+    try:
+        num_workers = int(raw)
+    except Exception as e:
+        raise RuntimeError("PMP num_workers must be an integer") from e
+    return max(0, int(num_workers))
+
+
 def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any]):
-    import torch
     from dgl.dataloading import DataLoader, MultiLayerFullNeighborSampler, NeighborSampler
 
     n_layer = int(cfg_pmp.get("n_layer", 1))
     batch_size = int(cfg_pmp.get("batch_size", 512))
     val_batch_size = int(cfg_pmp.get("val_batch_size", batch_size))
     test_batch_size = int(cfg_pmp.get("test_batch_size", batch_size))
+    num_workers = _resolve_pmp_num_workers(cfg_pmp)
 
     full_neighbors = bool(cfg_pmp.get("full_neighbors", True))
     sampled_neighbors = cfg_pmp.get("sampled_neighbors", [-1] * n_layer)
@@ -250,7 +284,7 @@ def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any
             prefetch_labels=prefetch_labels,
         )
 
-    # On Windows, keep num_workers=0 for stability.
+    # Windows uses num_workers=0 for DGL stability; Linux/macOS can use the config value.
     train_loader = DataLoader(
         g,
         train_idx,
@@ -258,7 +292,7 @@ def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any
         batch_size=batch_size,
         shuffle=True,
         drop_last=False,
-        num_workers=0,
+        num_workers=num_workers,
     )
     val_loader = DataLoader(
         g,
@@ -267,7 +301,7 @@ def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any
         batch_size=val_batch_size,
         shuffle=False,
         drop_last=False,
-        num_workers=0,
+        num_workers=num_workers,
     )
     test_loader = DataLoader(
         g,
@@ -276,7 +310,7 @@ def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any
         batch_size=test_batch_size,
         shuffle=False,
         drop_last=False,
-        num_workers=0,
+        num_workers=num_workers,
     )
 
     return train_loader, val_loader, test_loader
@@ -675,7 +709,12 @@ def run_pmp_stage(
 
         ds_cfg = dataset_cfg_by_id.get(v.dataset_id, {})
         dataset_source_name = str(ds_cfg.get("source_name", "yelp")).strip().lower()
-        cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name="LA-SAGE-S")
+        cfg_pmp = resolve_pmp_config(
+            repo_root,
+            dataset_source_name=dataset_source_name,
+            model_cfg=pmp_model_cfg,
+            model_name="LA-SAGE-S",
+        )
 
         graph_t0 = time.perf_counter()
         try:

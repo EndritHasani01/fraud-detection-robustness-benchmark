@@ -14,7 +14,7 @@ from .baselines_stage import (
     train_baseline_model,
 )
 from .config import get_training_seeds
-from .pmp_stage import _load_pmp_yaml_config, eval_pmp_model, train_pmp_model
+from .pmp_stage import eval_pmp_model, resolve_pmp_config, train_pmp_model
 from .results import (
     PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
     append_result_row,
@@ -117,7 +117,12 @@ def _train_shift_artifact(
             raise FileNotFoundError(f"Configured PMP repo_path does not exist: {repo_root}")
         ds_cfg = dataset_cfg_by_id.get(dataset_id, {})
         dataset_source_name = str(ds_cfg.get("source_name", "yelp")).strip().lower()
-        cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name="LA-SAGE-S")
+        cfg_pmp = resolve_pmp_config(
+            repo_root,
+            dataset_source_name=dataset_source_name,
+            model_cfg=model_cfg,
+            model_name="LA-SAGE-S",
+        )
         return train_pmp_model(
             clean_g,
             repo_root=repo_root,
