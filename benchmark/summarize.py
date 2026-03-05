@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean, stdev
 
+from .results import normalize_protocol
+
 
 @dataclass(frozen=True)
 class SummaryRow:
@@ -17,6 +19,7 @@ class SummaryRow:
     severity: float
     graph_seed: int
     model_id: str
+    protocol: str
     n_runs: int
     roc_auc_mean: float
     roc_auc_std: float
@@ -34,6 +37,7 @@ SUMMARY_COLUMNS = [
     "severity",
     "graph_seed",
     "model_id",
+    "protocol",
     "n_runs",
     "roc_auc_mean",
     "roc_auc_std",
@@ -66,7 +70,7 @@ def summarize_results_by_training_seed(
 ) -> None:
     """Summarize `results.csv` into mean/std across training seeds.
 
-    Groups by (experiment_name, dataset_id, split_id, scenario_id, severity, graph_seed, model_id).
+    Groups by (experiment_name, dataset_id, split_id, scenario_id, severity, graph_seed, model_id, protocol).
     Filters to status=="ok". If model_ids is provided, filters to those model_id values.
     """
     if not results_csv_path.exists():
@@ -91,6 +95,7 @@ def summarize_results_by_training_seed(
                 float(row.get("severity", 0.0) or 0.0),
                 _safe_int(row.get("graph_seed", 0)),
                 mid,
+                normalize_protocol(row.get("protocol", "")),
             )
 
             groups[key]["roc_auc"].append(_safe_float(row.get("roc_auc", "")))
@@ -103,7 +108,7 @@ def summarize_results_by_training_seed(
         w.writeheader()
 
         for key in sorted(groups.keys()):
-            exp, ds, split, scenario, sev, gseed, mid = key
+            exp, ds, split, scenario, sev, gseed, mid, protocol = key
             m = groups[key]
 
             def _m_std(vals: list[float]) -> tuple[float, float, int]:
@@ -128,6 +133,7 @@ def summarize_results_by_training_seed(
                     "severity": f"{float(sev):.6g}",
                     "graph_seed": int(gseed),
                     "model_id": mid,
+                    "protocol": protocol,
                     "n_runs": int(n_runs),
                     "roc_auc_mean": roc_m,
                     "roc_auc_std": roc_s,
@@ -137,4 +143,3 @@ def summarize_results_by_training_seed(
                     "f1_macro_std": f1_s,
                 }
             )
-

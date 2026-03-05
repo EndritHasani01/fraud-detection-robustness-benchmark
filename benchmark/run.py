@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import ConfigError, init_paths, load_json, validate_config, write_json
 from .paths import base_graph_path, variant_graph_path
-from .results import RESULTS_COLUMNS, VARIANTS_COLUMNS, append_csv_row, ensure_csv_header
+from .results import VARIANTS_COLUMNS, append_csv_row, ensure_csv_header, ensure_results_csv
 
 
 def _default_out_dir(cfg: dict, config_path: Path) -> Path:
@@ -59,7 +59,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
     write_json(paths.config_copy_path, cfg)
 
     # Ensure CSVs exist with correct schema. If --force is set, start fresh.
-    ensure_csv_header(paths.results_csv_path, RESULTS_COLUMNS, overwrite=force)
+    ensure_results_csv(paths.results_csv_path, overwrite=force)
     ensure_csv_header(paths.variants_csv_path, VARIANTS_COLUMNS, overwrite=force)
 
     experiment_name = cfg["experiment_name"]
@@ -189,9 +189,31 @@ def main(argv: list[str] | None = None) -> int:
         "'matrix' runs baselines + PMP + SEC-GFD; "
         "'plots' generates figures and plot-ready summaries from results.csv.",
     )
-    p.add_argument("--force", action="store_true", help="Overwrite cached outputs if they exist.")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite cached outputs if they exist and disable skip-existing for training stages.",
+    )
     p.add_argument("--force-reload", action="store_true", help="Force DGL dataset reload/redownload.")
     p.add_argument("--device", type=str, default="cpu", help="Device for model training ('cpu' or 'cuda').")
+    p.add_argument(
+        "--skip-existing",
+        dest="skip_existing",
+        action="store_true",
+        default=True,
+        help="Skip completed run keys already present in results.csv (default: enabled).",
+    )
+    p.add_argument(
+        "--no-skip-existing",
+        dest="skip_existing",
+        action="store_false",
+        help="Disable resumability checks and append fresh result rows.",
+    )
+    p.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="Re-attempt run keys that only have status=error rows instead of skipping them.",
+    )
     p.add_argument("--include-noop", action="store_true", help="Include no-op scenario rows (severity==0) in evaluation.")
     p.add_argument("--only-clean", action="store_true", help="Evaluate only the single clean base graph row.")
     p.add_argument("--max-variants", type=int, default=0, help="Evaluate at most N variant rows (0 = no limit).")
@@ -220,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = Path(args.out) if args.out else _default_out_dir(cfg, config_path)
     out_dir.mkdir(parents=True, exist_ok=True)
+    effective_skip_existing = False if bool(args.force) else bool(args.skip_existing)
 
     t0 = time.time()
     try:
@@ -232,6 +255,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),
+                skip_existing=effective_skip_existing,
+                retry_errors=bool(args.retry_errors),
                 device=str(args.device),
                 include_noop=bool(args.include_noop),
                 only_clean=bool(args.only_clean),
@@ -247,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),
+                skip_existing=effective_skip_existing,
+                retry_errors=bool(args.retry_errors),
                 device=str(args.device),
                 include_noop=bool(args.include_noop),
                 only_clean=bool(args.only_clean),
@@ -262,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),
+                skip_existing=effective_skip_existing,
+                retry_errors=bool(args.retry_errors),
                 device=str(args.device),
                 include_noop=bool(args.include_noop),
                 only_clean=bool(args.only_clean),
@@ -277,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),
+                skip_existing=effective_skip_existing,
+                retry_errors=bool(args.retry_errors),
                 device=str(args.device),
                 include_noop=bool(args.include_noop),
                 only_clean=bool(args.only_clean),

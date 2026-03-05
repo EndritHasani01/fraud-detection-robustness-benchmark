@@ -1,7 +1,19 @@
 from __future__ import annotations
 
 import csv
+import threading
 from pathlib import Path
+from typing import Any, Mapping
+
+
+PROTOCOL_TRAIN_ON_VARIANT = "train_on_variant"
+RESULTS_COLUMN_DEFAULTS = {
+    "protocol": PROTOCOL_TRAIN_ON_VARIANT,
+}
+
+RunKey = tuple[str, str, str, float, int, int, str, str]
+
+_CSV_LOCK = threading.RLock()
 
 
 RESULTS_COLUMNS = [
@@ -14,6 +26,7 @@ RESULTS_COLUMNS = [
     "scenario_id",
     "severity",
     "model_id",
+    "protocol",
     # metrics (may be empty until models are integrated)
     "roc_auc",
     "average_precision",
@@ -59,17 +72,155 @@ VARIANTS_COLUMNS = [
 ]
 
 
-def ensure_csv_header(path: Path, columns: list[str], *, overwrite: bool = False) -> None:
+def _safe_int(x: Any, default: int = 0) -> int:
+    try:
+        return int(float(x))
+    except Exception:
+        return int(default)
+
+
+def _safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+
+def normalize_protocol(protocol: Any) -> str:
+    text = str(protocol or "").strip()
+    return text or PROTOCOL_TRAIN_ON_VARIANT
+
+
+def make_run_key(
+    *,
+    dataset_id: Any,
+    split_id: Any,
+    scenario_id: Any,
+    severity: Any,
+    graph_seed: Any,
+    training_seed: Any,
+    model_id: Any,
+    protocol: Any = PROTOCOL_TRAIN_ON_VARIANT,
+) -> RunKey:
+    return (
+        str(dataset_id),
+        str(split_id),
+        str(scenario_id),
+        _safe_float(severity, 0.0),
+        _safe_int(graph_seed, 0),
+        _safe_int(training_seed, 0),
+        str(model_id),
+        normalize_protocol(protocol),
+    )
+
+
+def row_run_key(row: Mapping[str, Any]) -> RunKey:
+    return make_run_key(
+        dataset_id=row.get("dataset_id", ""),
+        split_id=row.get("split_id", ""),
+        scenario_id=row.get("scenario_id", ""),
+        severity=row.get("severity", 0.0),
+        graph_seed=row.get("graph_seed", 0),
+        training_seed=row.get("training_seed", 0),
+        model_id=row.get("model_id", ""),
+        protocol=row.get("protocol", ""),
+    )
+
+
+def truncate_error_message(error: Any, *, max_len: int = 500) -> str:
+    text = str(error).replace("\r", " ").replace("\n", " ").strip()
+    if len(text) <= int(max_len):
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3].rstrip() + "..."
+
+
+def _row_with_defaults(columns: list[str], row: Mapping[str, Any], row_defaults: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for col in columns:
+        value = row.get(col, "")
+        if (col not in row or value == "") and col in row_defaults:
+            value = row_defaults[col]
+        out[col] = value
+    return out
+
+
+def _current_csv_header(path: Path) -> list[str]:
+    with path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        return next(reader, [])
+
+
+def ensure_csv_header(
+    path: Path,
+    columns: list[str],
+    *,
+    overwrite: bool = False,
+    row_defaults: Mapping[str, Any] | None = None,
+) -> None:
+    row_defaults = row_defaults or {}
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and not overwrite:
-        return
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(columns)
+    with _CSV_LOCK:
+        if overwrite or not path.exists():
+            with path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(columns)
+            return
+
+        current_header = _current_csv_header(path)
+        if current_header == columns:
+            return
+
+        existing_rows: list[dict[str, Any]] = []
+        if current_header:
+            with path.open("r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                existing_rows = list(reader)
+
+        with path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=columns)
+            writer.writeheader()
+            for existing_row in existing_rows:
+                writer.writerow(_row_with_defaults(columns, existing_row, row_defaults))
 
 
-def append_csv_row(path: Path, columns: list[str], row: dict) -> None:
-    ensure_csv_header(path, columns, overwrite=False)
-    with path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columns)
-        writer.writerow({k: row.get(k, "") for k in columns})
+def append_csv_row(
+    path: Path,
+    columns: list[str],
+    row: Mapping[str, Any],
+    *,
+    row_defaults: Mapping[str, Any] | None = None,
+) -> None:
+    row_defaults = row_defaults or {}
+    with _CSV_LOCK:
+        ensure_csv_header(path, columns, overwrite=False, row_defaults=row_defaults)
+        with path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=columns)
+            writer.writerow(_row_with_defaults(columns, row, row_defaults))
+
+
+def ensure_results_csv(path: Path, *, overwrite: bool = False) -> None:
+    ensure_csv_header(path, RESULTS_COLUMNS, overwrite=overwrite, row_defaults=RESULTS_COLUMN_DEFAULTS)
+
+
+def append_result_row(path: Path, row: Mapping[str, Any]) -> None:
+    append_csv_row(path, RESULTS_COLUMNS, row, row_defaults=RESULTS_COLUMN_DEFAULTS)
+
+
+def load_completed_keys(path: Path, *, retry_errors: bool = False) -> set[RunKey]:
+    ensure_results_csv(path, overwrite=False)
+
+    statuses = {"ok"}
+    if not retry_errors:
+        statuses.add("error")
+
+    completed: set[RunKey] = set()
+    with path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            status = str(row.get("status", "")).strip().lower()
+            if status not in statuses:
+                continue
+            completed.add(row_run_key(row))
+    return completed

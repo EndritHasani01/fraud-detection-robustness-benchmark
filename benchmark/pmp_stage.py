@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from .metrics import average_precision_binary, best_f1_macro_threshold, f1_macro_at_threshold, roc_auc_binary
-from .results import RESULTS_COLUMNS, append_csv_row, ensure_csv_header
+from .results import (
+    PROTOCOL_TRAIN_ON_VARIANT,
+    append_result_row,
+    ensure_results_csv,
+    load_completed_keys,
+    make_run_key,
+    truncate_error_message,
+)
 from .summarize import summarize_results_by_training_seed
 
 
@@ -465,6 +472,8 @@ def run_pmp_stage(
     *,
     out_dir: Path,
     force: bool,
+    skip_existing: bool,
+    retry_errors: bool,
     device: str,
     include_noop: bool,
     only_clean: bool,
@@ -477,7 +486,8 @@ def run_pmp_stage(
     results_csv = out_dir / "results.csv"
     variants_csv = out_dir / "graph_variants.csv"
 
-    ensure_csv_header(results_csv, RESULTS_COLUMNS, overwrite=bool(force))
+    ensure_results_csv(results_csv, overwrite=bool(force))
+    completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
     variants = _read_variants_csv(variants_csv)
     if not variants:
@@ -485,7 +495,6 @@ def run_pmp_stage(
 
     dataset_cfg_by_id = {d["dataset_id"]: d for d in cfg.get("datasets", [])}
 
-    # Find PMP repo path in config.
     pmp_model_cfg = None
     for m in cfg.get("models", []):
         if str(m.get("model_id", "")) == "pmp":
@@ -502,7 +511,6 @@ def run_pmp_stage(
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 
-    # Filter variant rows.
     filtered: list[VariantRow] = []
     for v in variants:
         if only_clean and v.scenario_id != "clean":
@@ -514,12 +522,10 @@ def run_pmp_stage(
     if max_variants is not None:
         filtered = filtered[: int(max_variants)]
 
-    for v in filtered:
-        ds_cfg = dataset_cfg_by_id.get(v.dataset_id, {})
-        dataset_source_name = str(ds_cfg.get("source_name", "yelp")).strip().lower()
-        cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name="LA-SAGE-S")
+    protocol = PROTOCOL_TRAIN_ON_VARIANT
 
-        g = _load_graph_bin(Path(v.graph_path))
+    for v in filtered:
+        pending_runs: list[tuple[int, tuple[str, str, str, float, int, int, str, str], dict[str, Any]]] = []
 
         for training_seed in training_seeds:
             row_common = {
@@ -531,6 +537,7 @@ def run_pmp_stage(
                 "scenario_id": v.scenario_id,
                 "severity": float(v.severity),
                 "model_id": "pmp",
+                "protocol": protocol,
                 "n_nodes": int(v.n_nodes),
                 "n_edges": int(v.n_edges),
                 "mean_in_degree": float(v.mean_in_degree),
@@ -542,7 +549,52 @@ def run_pmp_stage(
                 "base_graph_path": v.base_graph_path,
                 "graph_path": v.graph_path,
             }
+            run_key = make_run_key(
+                dataset_id=v.dataset_id,
+                split_id=v.split_id,
+                scenario_id=v.scenario_id,
+                severity=v.severity,
+                graph_seed=v.graph_seed,
+                training_seed=training_seed,
+                model_id="pmp",
+                protocol=protocol,
+            )
+            if run_key in completed_keys:
+                print(
+                    f"[skip] pmp / {v.scenario_id} / sev={float(v.severity):g} / "
+                    f"gs={int(v.graph_seed)} / ts={int(training_seed)} already done"
+                )
+                continue
+            pending_runs.append((int(training_seed), run_key, row_common))
 
+        if not pending_runs:
+            continue
+
+        ds_cfg = dataset_cfg_by_id.get(v.dataset_id, {})
+        dataset_source_name = str(ds_cfg.get("source_name", "yelp")).strip().lower()
+        cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name="LA-SAGE-S")
+
+        graph_t0 = time.perf_counter()
+        try:
+            g = _load_graph_bin(Path(v.graph_path))
+        except Exception as e:
+            graph_error = truncate_error_message(e)
+            dt = time.perf_counter() - graph_t0
+            for _training_seed, run_key, row_common in pending_runs:
+                append_result_row(
+                    results_csv,
+                    {
+                        **row_common,
+                        "duration_sec": float(dt),
+                        "status": "error",
+                        "error": graph_error,
+                    },
+                )
+                completed_keys.add(run_key)
+            continue
+
+        for training_seed, run_key, row_common in pending_runs:
+            run_t0 = time.perf_counter()
             try:
                 out = train_eval_pmp(
                     g,
@@ -553,9 +605,8 @@ def run_pmp_stage(
                     max_epochs=max_epochs,
                     patience=patience,
                 )
-                append_csv_row(
+                append_result_row(
                     results_csv,
-                    RESULTS_COLUMNS,
                     {
                         **row_common,
                         "roc_auc": out["roc_auc"],
@@ -568,15 +619,17 @@ def run_pmp_stage(
                     },
                 )
             except Exception as e:
-                append_csv_row(
+                append_result_row(
                     results_csv,
-                    RESULTS_COLUMNS,
                     {
                         **row_common,
+                        "duration_sec": time.perf_counter() - run_t0,
                         "status": "error",
-                        "error": str(e),
+                        "error": truncate_error_message(e),
                     },
                 )
+            finally:
+                completed_keys.add(run_key)
 
     summarize_results_by_training_seed(
         results_csv,

@@ -14,7 +14,14 @@ from .metrics import (
     f1_macro_at_threshold,
     roc_auc_binary,
 )
-from .results import RESULTS_COLUMNS, append_csv_row, ensure_csv_header
+from .results import (
+    PROTOCOL_TRAIN_ON_VARIANT,
+    append_result_row,
+    ensure_results_csv,
+    load_completed_keys,
+    make_run_key,
+    truncate_error_message,
+)
 from .summarize import summarize_results_by_training_seed
 
 
@@ -281,6 +288,8 @@ def run_baselines_stage(
     *,
     out_dir: Path,
     force: bool,
+    skip_existing: bool,
+    retry_errors: bool,
     device: str,
     include_noop: bool,
     only_clean: bool,
@@ -294,7 +303,8 @@ def run_baselines_stage(
     results_csv = out_dir / "results.csv"
     variants_csv = out_dir / "graph_variants.csv"
 
-    ensure_csv_header(results_csv, RESULTS_COLUMNS, overwrite=bool(force))
+    ensure_results_csv(results_csv, overwrite=bool(force))
+    completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
     variants = _read_variants_csv(variants_csv)
     if not variants:
@@ -304,26 +314,25 @@ def run_baselines_stage(
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 
-    # Baselines we implement in TODO-03.
     baseline_model_ids = [m["model_id"] for m in cfg["models"] if str(m.get("model_id")) in {"mlp", "sage"}]
     if not baseline_model_ids:
         baseline_model_ids = ["mlp", "sage"]
 
-    # Filter variant rows.
     filtered: list[VariantRow] = []
     for v in variants:
         if only_clean and v.scenario_id != "clean":
             continue
         if (not include_noop) and (not v.scenario_applied) and v.scenario_id != "clean":
-            # Skip no-op scenario rows (severity==0) by default; use the single "clean" row as baseline.
             continue
         filtered.append(v)
 
     if max_variants is not None:
         filtered = filtered[: int(max_variants)]
 
+    protocol = PROTOCOL_TRAIN_ON_VARIANT
+
     for v in filtered:
-        g = _load_graph_bin(Path(v.graph_path))
+        pending_runs: list[tuple[str, int, tuple[str, str, str, float, int, int, str, str], dict[str, Any]]] = []
 
         for training_seed in training_seeds:
             for model_id in baseline_model_ids:
@@ -336,6 +345,7 @@ def run_baselines_stage(
                     "scenario_id": v.scenario_id,
                     "severity": float(v.severity),
                     "model_id": str(model_id),
+                    "protocol": protocol,
                     "n_nodes": int(v.n_nodes),
                     "n_edges": int(v.n_edges),
                     "mean_in_degree": float(v.mean_in_degree),
@@ -347,66 +357,106 @@ def run_baselines_stage(
                     "base_graph_path": v.base_graph_path,
                     "graph_path": v.graph_path,
                 }
-
-                try:
-                    # Simple per-model defaults.
-                    if model_id == "mlp":
-                        hp = BaselineHParams(lr=1e-3, max_epochs=100, patience=10, hidden_dim=128, dropout=0.5)
-                    else:
-                        hp = BaselineHParams(lr=1e-2, max_epochs=100, patience=10, hidden_dim=64, dropout=0.5)
-
-                    if max_epochs is not None:
-                        hp = BaselineHParams(
-                            hidden_dim=hp.hidden_dim,
-                            dropout=hp.dropout,
-                            lr=hp.lr,
-                            weight_decay=hp.weight_decay,
-                            max_epochs=int(max_epochs),
-                            patience=hp.patience,
-                        )
-                    if patience is not None:
-                        hp = BaselineHParams(
-                            hidden_dim=hp.hidden_dim,
-                            dropout=hp.dropout,
-                            lr=hp.lr,
-                            weight_decay=hp.weight_decay,
-                            max_epochs=hp.max_epochs,
-                            patience=int(patience),
-                        )
-
-                    out = train_eval_baseline(
-                        str(model_id),
-                        g,
-                        training_seed=int(training_seed),
-                        device=str(device),
-                        hparams=hp,
+                run_key = make_run_key(
+                    dataset_id=v.dataset_id,
+                    split_id=v.split_id,
+                    scenario_id=v.scenario_id,
+                    severity=v.severity,
+                    graph_seed=v.graph_seed,
+                    training_seed=training_seed,
+                    model_id=model_id,
+                    protocol=protocol,
+                )
+                if run_key in completed_keys:
+                    print(
+                        f"[skip] {model_id} / {v.scenario_id} / sev={float(v.severity):g} / "
+                        f"gs={int(v.graph_seed)} / ts={int(training_seed)} already done"
                     )
-                    append_csv_row(
-                        results_csv,
-                        RESULTS_COLUMNS,
-                        {
-                            **row_common,
-                            "roc_auc": out["roc_auc"],
-                            "average_precision": out["average_precision"],
-                            "f1_macro": out["f1_macro"],
-                            "threshold": out["threshold"],
-                            "duration_sec": out["duration_sec"],
-                            "status": "ok",
-                            "error": "",
-                        },
+                    continue
+                pending_runs.append((str(model_id), int(training_seed), run_key, row_common))
+
+        if not pending_runs:
+            continue
+
+        graph_t0 = time.perf_counter()
+        try:
+            g = _load_graph_bin(Path(v.graph_path))
+        except Exception as e:
+            graph_error = truncate_error_message(e)
+            dt = time.perf_counter() - graph_t0
+            for _model_id, _training_seed, run_key, row_common in pending_runs:
+                append_result_row(
+                    results_csv,
+                    {
+                        **row_common,
+                        "duration_sec": float(dt),
+                        "status": "error",
+                        "error": graph_error,
+                    },
+                )
+                completed_keys.add(run_key)
+            continue
+
+        for model_id, training_seed, run_key, row_common in pending_runs:
+            run_t0 = time.perf_counter()
+            try:
+                if model_id == "mlp":
+                    hp = BaselineHParams(lr=1e-3, max_epochs=100, patience=10, hidden_dim=128, dropout=0.5)
+                else:
+                    hp = BaselineHParams(lr=1e-2, max_epochs=100, patience=10, hidden_dim=64, dropout=0.5)
+
+                if max_epochs is not None:
+                    hp = BaselineHParams(
+                        hidden_dim=hp.hidden_dim,
+                        dropout=hp.dropout,
+                        lr=hp.lr,
+                        weight_decay=hp.weight_decay,
+                        max_epochs=int(max_epochs),
+                        patience=hp.patience,
                     )
-                except Exception as e:
-                    append_csv_row(
-                        results_csv,
-                        RESULTS_COLUMNS,
-                        {
-                            **row_common,
-                            "status": "error",
-                            "error": str(e),
-                        },
+                if patience is not None:
+                    hp = BaselineHParams(
+                        hidden_dim=hp.hidden_dim,
+                        dropout=hp.dropout,
+                        lr=hp.lr,
+                        weight_decay=hp.weight_decay,
+                        max_epochs=hp.max_epochs,
+                        patience=int(patience),
                     )
 
-    # Emit a compact mean/std summary (across training seeds) for the baselines.
+                out = train_eval_baseline(
+                    str(model_id),
+                    g,
+                    training_seed=int(training_seed),
+                    device=str(device),
+                    hparams=hp,
+                )
+                append_result_row(
+                    results_csv,
+                    {
+                        **row_common,
+                        "roc_auc": out["roc_auc"],
+                        "average_precision": out["average_precision"],
+                        "f1_macro": out["f1_macro"],
+                        "threshold": out["threshold"],
+                        "duration_sec": out["duration_sec"],
+                        "status": "ok",
+                        "error": "",
+                    },
+                )
+            except Exception as e:
+                append_result_row(
+                    results_csv,
+                    {
+                        **row_common,
+                        "duration_sec": time.perf_counter() - run_t0,
+                        "status": "error",
+                        "error": truncate_error_message(e),
+                    },
+                )
+            finally:
+                completed_keys.add(run_key)
+
     summarize_results_by_training_seed(
         results_csv,
         out_csv_path=out_dir / "results_summary_baselines.csv",

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .results import PROTOCOL_TRAIN_ON_VARIANT, normalize_protocol
+
 
 @dataclass(frozen=True)
 class ResultRow:
@@ -17,6 +19,7 @@ class ResultRow:
     scenario_id: str
     severity: float
     model_id: str
+    protocol: str
     roc_auc: float
     average_precision: float
     f1_macro: float
@@ -55,6 +58,7 @@ def _read_results_csv(path: Path) -> list[ResultRow]:
                     scenario_id=str(r.get("scenario_id", "")),
                     severity=float(r.get("severity", 0.0) or 0.0),
                     model_id=str(r.get("model_id", "")),
+                    protocol=normalize_protocol(r.get("protocol", "")),
                     roc_auc=_safe_float(r.get("roc_auc", "")),
                     average_precision=_safe_float(r.get("average_precision", "")),
                     f1_macro=_safe_float(r.get("f1_macro", "")),
@@ -149,6 +153,7 @@ def _completeness_report(
                     scenario_id,
                     float(severity),
                     _safe_int(r.get("graph_seed", 0)),
+                    PROTOCOL_TRAIN_ON_VARIANT,
                 )
             )
 
@@ -162,10 +167,10 @@ def _completeness_report(
     model_ids = [m for m in _model_ids_from_config(cfg) if m in {"mlp", "sage", "pmp", "secgfd"}]
 
     expected_keys: set[tuple] = set()
-    for ds, split, scenario_id, severity, graph_seed in expected_variant_rows:
+    for ds, split, scenario_id, severity, graph_seed, protocol in expected_variant_rows:
         for tr in training_seeds:
             for mid in model_ids:
-                expected_keys.add((ds, split, scenario_id, float(severity), int(graph_seed), int(tr), mid))
+                expected_keys.add((ds, split, scenario_id, float(severity), int(graph_seed), int(tr), mid, protocol))
 
     found_ok: set[tuple] = set()
     found_err: set[tuple] = set()
@@ -180,6 +185,7 @@ def _completeness_report(
                 _safe_int(r.get("graph_seed", 0)),
                 _safe_int(r.get("training_seed", 0)),
                 str(r.get("model_id", "")),
+                normalize_protocol(r.get("protocol", "")),
             )
             status = str(r.get("status", ""))
             if status == "ok":
@@ -191,7 +197,7 @@ def _completeness_report(
     errored = sorted(expected_keys & found_err)
 
     report_rows = []
-    for ds, split, scenario_id, severity, graph_seed, tr, mid in missing:
+    for ds, split, scenario_id, severity, graph_seed, tr, mid, protocol in missing:
         report_rows.append(
             {
                 "dataset_id": ds,
@@ -201,10 +207,11 @@ def _completeness_report(
                 "graph_seed": graph_seed,
                 "training_seed": tr,
                 "model_id": mid,
+                "protocol": protocol,
                 "status": "missing",
             }
         )
-    for ds, split, scenario_id, severity, graph_seed, tr, mid in errored:
+    for ds, split, scenario_id, severity, graph_seed, tr, mid, protocol in errored:
         report_rows.append(
             {
                 "dataset_id": ds,
@@ -214,6 +221,7 @@ def _completeness_report(
                 "graph_seed": graph_seed,
                 "training_seed": tr,
                 "model_id": mid,
+                "protocol": protocol,
                 "status": "error",
             }
         )
@@ -221,7 +229,17 @@ def _completeness_report(
     plots_dir = out_dir / "plots"
     _write_csv(
         plots_dir / "missing_or_error_runs.csv",
-        ["dataset_id", "split_id", "scenario_id", "severity", "graph_seed", "training_seed", "model_id", "status"],
+        [
+            "dataset_id",
+            "split_id",
+            "scenario_id",
+            "severity",
+            "graph_seed",
+            "training_seed",
+            "model_id",
+            "protocol",
+            "status",
+        ],
         report_rows,
     )
 
@@ -285,10 +303,10 @@ def run_plots_stage(
         "secgfd": "#d62728",
     }
 
-    ds_splits = sorted(set((r.dataset_id, r.split_id) for r in ok))
+    ds_splits = sorted(set((r.dataset_id, r.split_id, r.protocol) for r in ok))
 
-    for dataset_id, split_id in ds_splits:
-        ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id]
+    for dataset_id, split_id, protocol in ds_splits:
+        ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id and r.protocol == protocol]
 
         # Clean baseline stats per model (within this dataset/split).
         clean_by_model = {}
@@ -304,7 +322,7 @@ def run_plots_stage(
                 "f1_macro": _aggregate_mean_std([r.f1_macro for r in sel]),
             }
 
-        out_group_dir = plots_dir / dataset_id / split_id
+        out_group_dir = plots_dir / protocol / dataset_id / split_id
         out_group_dir.mkdir(parents=True, exist_ok=True)
 
         for scenario in cfg.get("scenarios", []):
@@ -331,6 +349,7 @@ def run_plots_stage(
                             "scenario_id": scenario_id,
                             "severity": 0.0,
                             "model_id": mid,
+                            "protocol": protocol,
                             "metric": metric_key,
                             "mean": m0,
                             "std": s0,
@@ -356,6 +375,7 @@ def run_plots_stage(
                                 "scenario_id": scenario_id,
                                 "severity": float(sev),
                                 "model_id": mid,
+                                "protocol": protocol,
                                 "metric": metric_key,
                                 "mean": m,
                                 "std": s,
@@ -376,7 +396,7 @@ def run_plots_stage(
                         capsize=3,
                     )
 
-                ax.set_title(f"{dataset_id}/{split_id} - {scenario_id}: {metric_key} vs severity")
+                ax.set_title(f"{dataset_id}/{split_id} [{protocol}] - {scenario_id}: {metric_key} vs severity")
                 ax.set_xlabel("Severity")
                 ax.set_ylabel(metric_key)
                 ax.set_xticks(sevs_plot)
@@ -390,14 +410,26 @@ def run_plots_stage(
 
     _write_csv(
         plots_dir / "summary_curves.csv",
-        ["dataset_id", "split_id", "scenario_id", "severity", "model_id", "metric", "mean", "std", "n_runs", "source"],
+        [
+            "dataset_id",
+            "split_id",
+            "scenario_id",
+            "severity",
+            "model_id",
+            "protocol",
+            "metric",
+            "mean",
+            "std",
+            "n_runs",
+            "source",
+        ],
         summary_rows,
     )
 
     # Performance drop: clean -> max severity for each scenario/model/metric.
     drop_rows: list[dict[str, Any]] = []
-    for dataset_id, split_id in ds_splits:
-        ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id]
+    for dataset_id, split_id, protocol in ds_splits:
+        ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id and r.protocol == protocol]
 
         clean_by_model = {}
         for mid in model_ids:
@@ -436,6 +468,7 @@ def run_plots_stage(
                             "split_id": split_id,
                             "scenario_id": scenario_id,
                             "model_id": mid,
+                            "protocol": protocol,
                             "metric": metric_key,
                             "max_severity": max_sev,
                             "clean_mean": clean_mean,
@@ -451,6 +484,7 @@ def run_plots_stage(
             "split_id",
             "scenario_id",
             "model_id",
+            "protocol",
             "metric",
             "max_severity",
             "clean_mean",
@@ -468,8 +502,8 @@ def run_plots_stage(
 
     if np is not None:
         robust_rows: list[dict[str, Any]] = []
-        for dataset_id, split_id in ds_splits:
-            ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id]
+        for dataset_id, split_id, protocol in ds_splits:
+            ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id and r.protocol == protocol]
 
             clean_by_model = {}
             for mid in model_ids:
@@ -525,6 +559,7 @@ def run_plots_stage(
                                 "split_id": split_id,
                                 "scenario_id": scenario_id,
                                 "model_id": mid,
+                                "protocol": protocol,
                                 "metric": metric_key,
                                 "robustness_auc": auc,
                                 "robustness_avg_metric": avg_over_range,
@@ -533,6 +568,15 @@ def run_plots_stage(
 
         _write_csv(
             plots_dir / "robustness_scores.csv",
-            ["dataset_id", "split_id", "scenario_id", "model_id", "metric", "robustness_auc", "robustness_avg_metric"],
+            [
+                "dataset_id",
+                "split_id",
+                "scenario_id",
+                "model_id",
+                "protocol",
+                "metric",
+                "robustness_auc",
+                "robustness_avg_metric",
+            ],
             robust_rows,
         )
