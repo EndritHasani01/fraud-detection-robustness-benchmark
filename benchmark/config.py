@@ -69,6 +69,38 @@ def get_graph_seeds(cfg: dict[str, Any]) -> list[int]:
     return get_training_seeds(cfg)
 
 
+def _validate_model_hparams(model_cfg: dict[str, Any]) -> None:
+    model_id = str(model_cfg.get("model_id", ""))
+    if model_id != "secgfd":
+        return
+
+    hparams = model_cfg.get("hparams")
+    if hparams is None:
+        return
+    if not isinstance(hparams, dict):
+        raise ConfigError("secgfd.hparams must be an object")
+
+    int_keys = {"hid_dim", "order_d", "high_order"}
+    float_keys = {"lemda", "lr", "weight_decay"}
+    allowed_keys = int_keys | float_keys
+
+    for key, value in hparams.items():
+        if key not in allowed_keys:
+            raise ConfigError(f"secgfd.hparams.{key} is not supported")
+        if key in int_keys:
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ConfigError(f"secgfd.hparams.{key} must be an integer")
+            if int(value) <= 0:
+                raise ConfigError(f"secgfd.hparams.{key} must be > 0")
+        else:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ConfigError(f"secgfd.hparams.{key} must be a number")
+            if key == "lr" and float(value) <= 0.0:
+                raise ConfigError("secgfd.hparams.lr must be > 0")
+            if key in {"lemda", "weight_decay"} and float(value) < 0.0:
+                raise ConfigError(f"secgfd.hparams.{key} must be >= 0")
+
+
 def validate_config(cfg: dict[str, Any]) -> None:
     required_top = [
         "experiment_name",
@@ -88,6 +120,8 @@ def validate_config(cfg: dict[str, Any]) -> None:
         raise ConfigError("cfg['datasets'] must be a non-empty list")
     if not isinstance(cfg["data_splits"], list) or not cfg["data_splits"]:
         raise ConfigError("cfg['data_splits'] must be a non-empty list")
+    if not isinstance(cfg["models"], list) or not cfg["models"]:
+        raise ConfigError("cfg['models'] must be a non-empty list")
     if not isinstance(cfg["scenarios"], list) or not cfg["scenarios"]:
         raise ConfigError("cfg['scenarios'] must be a non-empty list")
 
@@ -106,6 +140,13 @@ def validate_config(cfg: dict[str, Any]) -> None:
         )
     _validated_seed_list(seeds, key="training_seeds", required=True)
     _validated_seed_list(seeds, key="graph_seeds", required=False)
+
+    for idx, model_cfg in enumerate(cfg["models"]):
+        if not isinstance(model_cfg, dict):
+            raise ConfigError(f"cfg['models'][{idx}] must be an object")
+        if not str(model_cfg.get("model_id", "")).strip():
+            raise ConfigError(f"cfg['models'][{idx}].model_id must be a non-empty string")
+        _validate_model_hparams(model_cfg)
 
     eval_cfg = cfg["evaluation"]
     metrics = eval_cfg.get("metrics")

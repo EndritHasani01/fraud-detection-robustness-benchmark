@@ -21,6 +21,9 @@ def run_matrix_stage(
     max_training_seeds: int | None,
     max_epochs: int | None,
     patience: int | None,
+    secgfd_hid_dim: int | None = None,
+    secgfd_order_d: int | None = None,
+    secgfd_high_order: int | None = None,
 ) -> None:
     """Run the full experiment matrix for all integrated models.
 
@@ -55,6 +58,9 @@ def run_matrix_stage(
             max_training_seeds=max_training_seeds,
             max_epochs=max_epochs,
             patience=patience,
+            secgfd_hid_dim=secgfd_hid_dim,
+            secgfd_order_d=secgfd_order_d,
+            secgfd_high_order=secgfd_high_order,
         )
         return
 
@@ -76,6 +82,9 @@ def run_matrix_stage(
         max_training_seeds=max_training_seeds,
         max_epochs=max_epochs,
         patience=patience,
+        secgfd_hid_dim=secgfd_hid_dim,
+        secgfd_order_d=secgfd_order_d,
+        secgfd_high_order=secgfd_high_order,
     )
 
     run_pmp_stage(

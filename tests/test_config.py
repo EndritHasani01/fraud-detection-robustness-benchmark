@@ -54,6 +54,38 @@ class ConfigSeedTests(unittest.TestCase):
 
         self.assertIn("missing both seeds.training_seeds and seeds.graph_seeds", stderr.getvalue())
 
+    def test_validate_config_accepts_secgfd_hparams(self) -> None:
+        cfg = _base_cfg()
+        cfg["models"] = [
+            {
+                "model_id": "secgfd",
+                "repo_path": "Repos/SEC-GFD-main",
+                "hparams": {
+                    "hid_dim": 32,
+                    "order_d": 2,
+                    "high_order": 1,
+                    "lemda": 0.2,
+                    "lr": 0.01,
+                    "weight_decay": 0.0,
+                },
+            }
+        ]
+
+        validate_config(cfg)
+
+    def test_validate_config_rejects_invalid_secgfd_hparams(self) -> None:
+        cfg = _base_cfg()
+        cfg["models"] = [
+            {
+                "model_id": "secgfd",
+                "repo_path": "Repos/SEC-GFD-main",
+                "hparams": {"high_order": "fast"},
+            }
+        ]
+
+        with self.assertRaisesRegex(ConfigError, r"secgfd\.hparams\.high_order must be an integer"):
+            validate_config(cfg)
+
 
 if __name__ == "__main__":
     unittest.main()

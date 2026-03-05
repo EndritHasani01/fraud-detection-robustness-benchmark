@@ -23,7 +23,12 @@ from .results import (
     make_run_key,
     truncate_error_message,
 )
-from .secgfd_stage import eval_secgfd_model, train_secgfd_model
+from .secgfd_stage import (
+    eval_secgfd_model,
+    resolve_secgfd_hparams,
+    resolve_secgfd_training_controls,
+    train_secgfd_model,
+)
 from .summarize import summarize_results_by_training_seed
 
 
@@ -91,6 +96,9 @@ def _train_shift_artifact(
     device: str,
     max_epochs: int | None,
     patience: int | None,
+    secgfd_hid_dim: int | None,
+    secgfd_order_d: int | None,
+    secgfd_high_order: int | None,
 ):
     if model_id in {"mlp", "sage"}:
         hp = build_baseline_hparams(model_id, max_epochs=max_epochs, patience=patience)
@@ -125,13 +133,29 @@ def _train_shift_artifact(
         repo_root = Path(str(model_cfg.get("repo_path", "")))
         if not repo_root.exists():
             raise FileNotFoundError(f"Configured SEC-GFD repo_path does not exist: {repo_root}")
+        secgfd_hparams = resolve_secgfd_hparams(
+            model_cfg,
+            hid_dim_override=secgfd_hid_dim,
+            order_d_override=secgfd_order_d,
+            high_order_override=secgfd_high_order,
+        )
+        effective_max_epochs, effective_patience = resolve_secgfd_training_controls(
+            max_epochs=max_epochs,
+            patience=patience,
+        )
         return train_secgfd_model(
             clean_g,
             repo_root=repo_root,
             training_seed=int(training_seed),
             device=str(device),
-            max_epochs=max_epochs,
-            patience=patience,
+            max_epochs=effective_max_epochs,
+            patience=effective_patience,
+            hid_dim=int(secgfd_hparams["hid_dim"]),
+            order_d=int(secgfd_hparams["order_d"]),
+            high_order=int(secgfd_hparams["high_order"]),
+            lemda=float(secgfd_hparams["lemda"]),
+            lr=float(secgfd_hparams["lr"]),
+            weight_decay=float(secgfd_hparams["weight_decay"]),
         )
 
     raise ValueError(f"Unsupported shift model_id: {model_id}")
@@ -161,6 +185,9 @@ def run_shift_stage(
     max_training_seeds: int | None,
     max_epochs: int | None,
     patience: int | None,
+    secgfd_hid_dim: int | None = None,
+    secgfd_order_d: int | None = None,
+    secgfd_high_order: int | None = None,
 ) -> None:
     out_dir = out_dir.resolve()
     results_csv = out_dir / "results.csv"
@@ -288,6 +315,9 @@ def run_shift_stage(
                         device=str(device),
                         max_epochs=max_epochs,
                         patience=patience,
+                        secgfd_hid_dim=secgfd_hid_dim,
+                        secgfd_order_d=secgfd_order_d,
+                        secgfd_high_order=secgfd_high_order,
                     )
                     train_dt = time.perf_counter() - train_t0
                 except Exception as e:

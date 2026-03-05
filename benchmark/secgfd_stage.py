@@ -20,6 +20,19 @@ from .results import (
 )
 from .summarize import summarize_results_by_training_seed
 
+SECGFD_DEFAULT_HPARAMS = {
+    "hid_dim": 32,
+    "order_d": 2,
+    "high_order": 1,
+    "lemda": 0.2,
+    "lr": 0.01,
+    "weight_decay": 0.0,
+}
+SECGFD_DEFAULT_MAX_EPOCHS = 50
+SECGFD_DEFAULT_PATIENCE = 10
+
+_SECGFD_THETA_CACHE: dict[tuple[str, int], tuple[tuple[float, ...], ...]] = {}
+
 
 @dataclass(frozen=True)
 class VariantRow:
@@ -56,6 +69,31 @@ class SECGFDModelArtifact:
     lemda: float
     lr: float
     weight_decay: float
+
+
+def _coerce_positive_int(value: Any, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"{name} must be an integer")
+    value = int(value)
+    if value <= 0:
+        raise RuntimeError(f"{name} must be > 0")
+    return value
+
+
+def _coerce_non_negative_float(value: Any, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"{name} must be a number")
+    value = float(value)
+    if value < 0.0:
+        raise RuntimeError(f"{name} must be >= 0")
+    return value
+
+
+def _coerce_positive_float(value: Any, *, name: str) -> float:
+    value = _coerce_non_negative_float(value, name=name)
+    if value <= 0.0:
+        raise RuntimeError(f"{name} must be > 0")
+    return value
 
 
 def _parse_bool(x: Any) -> bool:
@@ -145,7 +183,54 @@ def _load_graph_bin(path: Path):
     return graphs[0]
 
 
-def _import_secgfd_class(repo_root: Path):
+def resolve_secgfd_hparams(
+    model_cfg: dict[str, Any],
+    *,
+    hid_dim_override: int | None = None,
+    order_d_override: int | None = None,
+    high_order_override: int | None = None,
+) -> dict[str, Any]:
+    out = dict(SECGFD_DEFAULT_HPARAMS)
+
+    raw_hparams = model_cfg.get("hparams")
+    if raw_hparams is not None:
+        if not isinstance(raw_hparams, dict):
+            raise RuntimeError("secgfd model config hparams must be an object")
+        if "hid_dim" in raw_hparams:
+            out["hid_dim"] = _coerce_positive_int(raw_hparams["hid_dim"], name="secgfd.hparams.hid_dim")
+        if "order_d" in raw_hparams:
+            out["order_d"] = _coerce_positive_int(raw_hparams["order_d"], name="secgfd.hparams.order_d")
+        if "high_order" in raw_hparams:
+            out["high_order"] = _coerce_positive_int(raw_hparams["high_order"], name="secgfd.hparams.high_order")
+        if "lemda" in raw_hparams:
+            out["lemda"] = _coerce_non_negative_float(raw_hparams["lemda"], name="secgfd.hparams.lemda")
+        if "lr" in raw_hparams:
+            out["lr"] = _coerce_positive_float(raw_hparams["lr"], name="secgfd.hparams.lr")
+        if "weight_decay" in raw_hparams:
+            out["weight_decay"] = _coerce_non_negative_float(
+                raw_hparams["weight_decay"], name="secgfd.hparams.weight_decay"
+            )
+
+    if hid_dim_override is not None:
+        out["hid_dim"] = _coerce_positive_int(hid_dim_override, name="--secgfd-hid-dim")
+    if order_d_override is not None:
+        out["order_d"] = _coerce_positive_int(order_d_override, name="--secgfd-order-d")
+    if high_order_override is not None:
+        out["high_order"] = _coerce_positive_int(high_order_override, name="--secgfd-high-order")
+    return out
+
+
+def resolve_secgfd_training_controls(*, max_epochs: int | None, patience: int | None) -> tuple[int, int]:
+    eff_max_epochs = SECGFD_DEFAULT_MAX_EPOCHS if max_epochs is None else int(max_epochs)
+    eff_patience = SECGFD_DEFAULT_PATIENCE if patience is None else int(patience)
+    if eff_max_epochs <= 0:
+        raise RuntimeError("SEC-GFD max_epochs must be > 0")
+    if eff_patience < 0:
+        raise RuntimeError("SEC-GFD patience must be >= 0")
+    return eff_max_epochs, eff_patience
+
+
+def _import_secgfd_module(repo_root: Path):
     import importlib.util
 
     repo_root = repo_root.resolve()
@@ -156,13 +241,51 @@ def _import_secgfd_class(repo_root: Path):
     # Load under a unique module name to avoid collisions with other repos that
     # use a top-level package name like 'model'.
     mod_name = "secgfd_repo_model_SECGFD"
+    existing = sys.modules.get(mod_name)
+    if existing is not None and Path(getattr(existing, "__file__", "")).resolve() == secgfd_py.resolve():
+        return existing
+
     spec = importlib.util.spec_from_file_location(mod_name, secgfd_py)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to create import spec for: {secgfd_py}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[mod_name] = mod
     spec.loader.exec_module(mod)
+    return mod
 
+
+def _install_secgfd_theta_cache(secgfd_module: Any) -> None:
+    if getattr(secgfd_module, "_benchmark_theta_cache_enabled", False):
+        return
+    original_calculate_theta2 = getattr(secgfd_module, "calculate_theta2", None)
+    if original_calculate_theta2 is None:
+        raise RuntimeError("SEC-GFD module did not define calculate_theta2")
+    module_file = str(Path(getattr(secgfd_module, "__file__", "secgfd_module")).resolve())
+
+    def _cached_calculate_theta2(*args, **kwargs):
+        if "d" in kwargs:
+            order_d = int(kwargs["d"])
+        elif args:
+            order_d = int(args[0])
+        else:
+            raise TypeError("calculate_theta2 expects a polynomial degree 'd'")
+
+        cache_key = (module_file, order_d)
+        cached = _SECGFD_THETA_CACHE.get(cache_key)
+        if cached is None:
+            computed = original_calculate_theta2(*args, **kwargs)
+            cached = tuple(tuple(float(coeff) for coeff in theta) for theta in computed)
+            _SECGFD_THETA_CACHE[cache_key] = cached
+        return [list(theta) for theta in cached]
+
+    setattr(secgfd_module, "_benchmark_original_calculate_theta2", original_calculate_theta2)
+    setattr(secgfd_module, "calculate_theta2", _cached_calculate_theta2)
+    setattr(secgfd_module, "_benchmark_theta_cache_enabled", True)
+
+
+def _import_secgfd_class(repo_root: Path):
+    mod = _import_secgfd_module(repo_root)
+    _install_secgfd_theta_cache(mod)
     if not hasattr(mod, "SECGFD"):
         raise RuntimeError("SEC-GFD module did not define SECGFD")
     return getattr(mod, "SECGFD")
@@ -245,9 +368,9 @@ def train_secgfd_model(
     device: str,
     max_epochs: int | None,
     patience: int | None,
-    hid_dim: int = 64,
+    hid_dim: int = 32,
     order_d: int = 2,
-    high_order: int = 2,
+    high_order: int = 1,
     lemda: float = 0.2,
     lr: float = 0.01,
     weight_decay: float = 0.0,
@@ -297,8 +420,8 @@ def train_secgfd_model(
     pos_w = _class_weight_pos(labels[train_idx])
     ce_weight = torch.tensor([1.0, float(pos_w)], dtype=torch.float32, device=effective_device)
 
-    epochs = 100 if max_epochs is None else int(max_epochs)
-    es_patience = 10 if patience is None else int(patience)
+    epochs = SECGFD_DEFAULT_MAX_EPOCHS if max_epochs is None else int(max_epochs)
+    es_patience = SECGFD_DEFAULT_PATIENCE if patience is None else int(patience)
 
     best_monitor = -float("inf")
     best_state = None
@@ -425,9 +548,9 @@ def train_eval_secgfd(
     device: str,
     max_epochs: int | None,
     patience: int | None,
-    hid_dim: int = 64,
+    hid_dim: int = 32,
     order_d: int = 2,
-    high_order: int = 2,
+    high_order: int = 1,
     lemda: float = 0.2,
     lr: float = 0.01,
     weight_decay: float = 0.0,
@@ -466,6 +589,9 @@ def run_secgfd_stage(
     max_training_seeds: int | None,
     max_epochs: int | None,
     patience: int | None,
+    secgfd_hid_dim: int | None = None,
+    secgfd_order_d: int | None = None,
+    secgfd_high_order: int | None = None,
 ) -> None:
     out_dir = out_dir.resolve()
     results_csv = out_dir / "results.csv"
@@ -489,6 +615,16 @@ def run_secgfd_stage(
     repo_root = Path(str(sec_cfg.get("repo_path", "")))
     if not repo_root.exists():
         raise FileNotFoundError(f"Configured SEC-GFD repo_path does not exist: {repo_root}")
+    secgfd_hparams = resolve_secgfd_hparams(
+        sec_cfg,
+        hid_dim_override=secgfd_hid_dim,
+        order_d_override=secgfd_order_d,
+        high_order_override=secgfd_high_order,
+    )
+    effective_max_epochs, effective_patience = resolve_secgfd_training_controls(
+        max_epochs=max_epochs,
+        patience=patience,
+    )
 
     training_seeds = get_training_seeds(cfg)
     if max_training_seeds is not None:
@@ -581,8 +717,14 @@ def run_secgfd_stage(
                     repo_root=repo_root,
                     training_seed=int(training_seed),
                     device=str(device),
-                    max_epochs=max_epochs,
-                    patience=patience,
+                    max_epochs=effective_max_epochs,
+                    patience=effective_patience,
+                    hid_dim=int(secgfd_hparams["hid_dim"]),
+                    order_d=int(secgfd_hparams["order_d"]),
+                    high_order=int(secgfd_hparams["high_order"]),
+                    lemda=float(secgfd_hparams["lemda"]),
+                    lr=float(secgfd_hparams["lr"]),
+                    weight_decay=float(secgfd_hparams["weight_decay"]),
                 )
                 append_result_row(
                     results_csv,

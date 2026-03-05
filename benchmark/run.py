@@ -245,6 +245,24 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Override early-stop patience for training stages (0 = use defaults).",
     )
+    p.add_argument(
+        "--secgfd-hid-dim",
+        type=int,
+        default=0,
+        help="Override SEC-GFD hidden dimension (0 = use config/default).",
+    )
+    p.add_argument(
+        "--secgfd-high-order",
+        type=int,
+        default=0,
+        help="Override SEC-GFD high-order spectral depth (0 = use config/default).",
+    )
+    p.add_argument(
+        "--secgfd-order-d",
+        type=int,
+        default=0,
+        help="Override SEC-GFD polynomial order d (0 = use config/default).",
+    )
     args = p.parse_args(argv)
 
     config_path = Path(args.config)
@@ -313,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
                 max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
                 max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
                 patience=(None if int(args.patience) <= 0 else int(args.patience)),
+                secgfd_hid_dim=(None if int(args.secgfd_hid_dim) <= 0 else int(args.secgfd_hid_dim)),
+                secgfd_order_d=(None if int(args.secgfd_order_d) <= 0 else int(args.secgfd_order_d)),
+                secgfd_high_order=(None if int(args.secgfd_high_order) <= 0 else int(args.secgfd_high_order)),
             )
         elif args.stage == "shift":
             from .shift_stage import run_shift_stage
@@ -330,6 +351,9 @@ def main(argv: list[str] | None = None) -> int:
                 max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
                 max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
                 patience=(None if int(args.patience) <= 0 else int(args.patience)),
+                secgfd_hid_dim=(None if int(args.secgfd_hid_dim) <= 0 else int(args.secgfd_hid_dim)),
+                secgfd_order_d=(None if int(args.secgfd_order_d) <= 0 else int(args.secgfd_order_d)),
+                secgfd_high_order=(None if int(args.secgfd_high_order) <= 0 else int(args.secgfd_high_order)),
             )
         elif args.stage == "matrix":
             from .matrix_stage import run_matrix_stage
@@ -348,6 +372,9 @@ def main(argv: list[str] | None = None) -> int:
                 max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
                 max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
                 patience=(None if int(args.patience) <= 0 else int(args.patience)),
+                secgfd_hid_dim=(None if int(args.secgfd_hid_dim) <= 0 else int(args.secgfd_hid_dim)),
+                secgfd_order_d=(None if int(args.secgfd_order_d) <= 0 else int(args.secgfd_order_d)),
+                secgfd_high_order=(None if int(args.secgfd_high_order) <= 0 else int(args.secgfd_high_order)),
             )
         elif args.stage == "plots":
             from .plots_stage import run_plots_stage
