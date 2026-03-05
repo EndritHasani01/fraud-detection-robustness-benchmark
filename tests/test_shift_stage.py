@@ -173,13 +173,17 @@ class MatrixProtocolDispatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir)
             (out_dir / "graph_variants.csv").write_text("dataset_id,split_id\n", encoding="utf-8")
+            cfg = {
+                "seeds": {"training_seeds": [0]},
+                "models": [{"model_id": "mlp"}],
+            }
 
             with mock.patch("benchmark.shift_stage.run_shift_stage") as shift_mock:
                 with mock.patch("benchmark.baselines_stage.run_baselines_stage") as baselines_mock:
                     with mock.patch("benchmark.pmp_stage.run_pmp_stage") as pmp_mock:
                         with mock.patch("benchmark.secgfd_stage.run_secgfd_stage") as secgfd_mock:
                             run_matrix_stage(
-                                {},
+                                cfg,
                                 out_dir=out_dir,
                                 force=False,
                                 protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,

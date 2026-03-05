@@ -15,6 +15,15 @@ from .metrics import (
     f1_macro_at_threshold,
     roc_auc_binary,
 )
+from .preflight import (
+    ProgressTracker,
+    build_expected_run_keys,
+    filter_variant_rows,
+    print_training_preflight,
+    select_model_ids,
+    summarize_training_preflight,
+    warn_no_matching_models,
+)
 from .results import (
     PROTOCOL_TRAIN_ON_VARIANT,
     append_result_row,
@@ -411,6 +420,7 @@ def run_baselines_stage(
     max_training_seeds: int | None,
     max_epochs: int | None,
     patience: int | None,
+    selected_model_ids: list[str] | None = None,
 ) -> None:
     """Train/evaluate baseline models and append rows into results.csv."""
     out_dir = out_dir.resolve()
@@ -428,22 +438,50 @@ def run_baselines_stage(
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 
-    baseline_model_ids = [m["model_id"] for m in cfg["models"] if str(m.get("model_id")) in {"mlp", "sage"}]
+    configured_baseline_model_ids = select_model_ids(
+        cfg,
+        supported_model_ids={"mlp", "sage"},
+        requested_model_ids=None,
+    )
+    baseline_model_ids = select_model_ids(
+        cfg,
+        supported_model_ids={"mlp", "sage"},
+        requested_model_ids=selected_model_ids,
+        default_order=(["mlp", "sage"] if not configured_baseline_model_ids else None),
+    )
     if not baseline_model_ids:
-        baseline_model_ids = ["mlp", "sage"]
+        warn_no_matching_models("baselines", selected_model_ids)
+        return
 
-    filtered: list[VariantRow] = []
-    for v in variants:
-        if only_clean and v.scenario_id != "clean":
-            continue
-        if (not include_noop) and (not v.scenario_applied) and v.scenario_id != "clean":
-            continue
-        filtered.append(v)
-
-    if max_variants is not None:
-        filtered = filtered[: int(max_variants)]
+    filtered = filter_variant_rows(
+        variants,
+        include_noop=bool(include_noop),
+        only_clean=bool(only_clean),
+        max_variants=max_variants,
+    )
 
     protocol = PROTOCOL_TRAIN_ON_VARIANT
+    expected_keys = build_expected_run_keys(
+        filtered,
+        training_seeds=training_seeds,
+        model_ids=baseline_model_ids,
+        protocol=protocol,
+    )
+    preflight = summarize_training_preflight(
+        results_csv,
+        expected_keys=expected_keys,
+        completed_keys=completed_keys,
+        skip_existing=bool(skip_existing),
+        model_ids=baseline_model_ids,
+        protocol=protocol,
+    )
+    print_training_preflight(
+        variant_count=len(filtered),
+        training_seed_count=len(training_seeds),
+        model_ids=baseline_model_ids,
+        summary=preflight,
+    )
+    progress = ProgressTracker(stage_label="baselines", total_runs=preflight.total_runs, already_done=preflight.already_done)
 
     for v in filtered:
         pending_runs: list[tuple[str, int, tuple[str, str, str, float, int, int, str, str], dict[str, Any]]] = []
@@ -509,6 +547,15 @@ def run_baselines_stage(
                         "error": graph_error,
                     },
                 )
+                progress.record(
+                    model_id=str(row_common["model_id"]),
+                    scenario_id=str(row_common["scenario_id"]),
+                    severity=float(row_common["severity"]),
+                    graph_seed=int(row_common["graph_seed"]),
+                    training_seed=int(row_common["training_seed"]),
+                    status="error",
+                    duration_sec=float(dt),
+                )
                 completed_keys.add(run_key)
             continue
 
@@ -537,15 +584,35 @@ def run_baselines_stage(
                         "error": "",
                     },
                 )
+                progress.record(
+                    model_id=str(model_id),
+                    scenario_id=v.scenario_id,
+                    severity=float(v.severity),
+                    graph_seed=int(v.graph_seed),
+                    training_seed=int(training_seed),
+                    status="ok",
+                    duration_sec=float(out["duration_sec"]),
+                    roc_auc=float(out["roc_auc"]),
+                )
             except Exception as e:
+                dt = time.perf_counter() - run_t0
                 append_result_row(
                     results_csv,
                     {
                         **row_common,
-                        "duration_sec": time.perf_counter() - run_t0,
+                        "duration_sec": dt,
                         "status": "error",
                         "error": truncate_error_message(e),
                     },
+                )
+                progress.record(
+                    model_id=str(model_id),
+                    scenario_id=v.scenario_id,
+                    severity=float(v.severity),
+                    graph_seed=int(v.graph_seed),
+                    training_seed=int(training_seed),
+                    status="error",
+                    duration_sec=float(dt),
                 )
             finally:
                 completed_keys.add(run_key)

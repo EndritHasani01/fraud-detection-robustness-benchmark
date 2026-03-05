@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .config import ConfigError, get_graph_seeds, init_paths, load_json, validate_config, write_json
 from .paths import base_graph_path, variant_graph_path
+from .preflight import parse_requested_model_ids, print_graphs_preflight
 from .results import (
     PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
     PROTOCOL_TRAIN_ON_VARIANT,
@@ -212,6 +213,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Evaluation protocol. For --stage matrix, train_clean_eval_all runs the shift protocol.",
     )
     p.add_argument(
+        "--models",
+        type=str,
+        default="",
+        help="Comma-separated model IDs to run (for example: mlp,sage or pmp,secgfd).",
+    )
+    p.add_argument(
         "--skip-existing",
         dest="skip_existing",
         action="store_true",
@@ -276,10 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out) if args.out else _default_out_dir(cfg, config_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_skip_existing = False if bool(args.force) else bool(args.skip_existing)
+    requested_model_ids = parse_requested_model_ids(args.models)
 
     t0 = time.time()
     try:
         if args.stage == "graphs":
+            print_graphs_preflight(cfg)
             _graphs_only(cfg, out_dir=out_dir, force=bool(args.force), force_reload=bool(args.force_reload))
         elif args.stage == "baselines":
             from .baselines_stage import run_baselines_stage
@@ -297,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
                 max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
                 patience=(None if int(args.patience) <= 0 else int(args.patience)),
+                selected_model_ids=requested_model_ids,
             )
         elif args.stage == "pmp":
             from .pmp_stage import run_pmp_stage
@@ -314,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
                 max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
                 patience=(None if int(args.patience) <= 0 else int(args.patience)),
+                selected_model_ids=requested_model_ids,
             )
         elif args.stage == "secgfd":
             from .secgfd_stage import run_secgfd_stage
@@ -334,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                 secgfd_hid_dim=(None if int(args.secgfd_hid_dim) <= 0 else int(args.secgfd_hid_dim)),
                 secgfd_order_d=(None if int(args.secgfd_order_d) <= 0 else int(args.secgfd_order_d)),
                 secgfd_high_order=(None if int(args.secgfd_high_order) <= 0 else int(args.secgfd_high_order)),
+                selected_model_ids=requested_model_ids,
             )
         elif args.stage == "shift":
             from .shift_stage import run_shift_stage
@@ -354,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
                 secgfd_hid_dim=(None if int(args.secgfd_hid_dim) <= 0 else int(args.secgfd_hid_dim)),
                 secgfd_order_d=(None if int(args.secgfd_order_d) <= 0 else int(args.secgfd_order_d)),
                 secgfd_high_order=(None if int(args.secgfd_high_order) <= 0 else int(args.secgfd_high_order)),
+                selected_model_ids=requested_model_ids,
             )
         elif args.stage == "matrix":
             from .matrix_stage import run_matrix_stage
@@ -375,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
                 secgfd_hid_dim=(None if int(args.secgfd_hid_dim) <= 0 else int(args.secgfd_hid_dim)),
                 secgfd_order_d=(None if int(args.secgfd_order_d) <= 0 else int(args.secgfd_order_d)),
                 secgfd_high_order=(None if int(args.secgfd_high_order) <= 0 else int(args.secgfd_high_order)),
+                selected_model_ids=requested_model_ids,
             )
         elif args.stage == "plots":
             from .plots_stage import run_plots_stage

@@ -14,6 +14,15 @@ from .baselines_stage import (
     train_baseline_model,
 )
 from .config import get_training_seeds
+from .preflight import (
+    ProgressTracker,
+    build_expected_run_keys,
+    filter_variant_rows,
+    print_training_preflight,
+    select_model_ids,
+    summarize_training_preflight,
+    warn_no_matching_models,
+)
 from .pmp_stage import eval_pmp_model, resolve_pmp_config, train_pmp_model
 from .results import (
     PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
@@ -46,25 +55,6 @@ def _supported_model_ids(cfg: dict[str, Any]) -> list[str]:
         seen.add(mid)
         out.append(mid)
     return out
-
-
-def _filtered_variants(
-    variants: list[VariantRow],
-    *,
-    include_noop: bool,
-    only_clean: bool,
-    max_variants: int | None,
-) -> list[VariantRow]:
-    filtered: list[VariantRow] = []
-    for v in variants:
-        if only_clean and v.scenario_id != "clean":
-            continue
-        if (not include_noop) and (not v.scenario_applied) and v.scenario_id != "clean":
-            continue
-        filtered.append(v)
-    if max_variants is not None:
-        filtered = filtered[: int(max_variants)]
-    return filtered
 
 
 def _group_variants_by_split(variants: list[VariantRow]) -> list[tuple[tuple[str, str], list[VariantRow]]]:
@@ -193,6 +183,7 @@ def run_shift_stage(
     secgfd_hid_dim: int | None = None,
     secgfd_order_d: int | None = None,
     secgfd_high_order: int | None = None,
+    selected_model_ids: list[str] | None = None,
 ) -> None:
     out_dir = out_dir.resolve()
     results_csv = out_dir / "results.csv"
@@ -205,7 +196,7 @@ def run_shift_stage(
     if not variants:
         raise RuntimeError(f"No rows found in {variants_csv}")
 
-    filtered = _filtered_variants(
+    filtered = filter_variant_rows(
         variants,
         include_noop=bool(include_noop),
         only_clean=bool(only_clean),
@@ -225,9 +216,36 @@ def run_shift_stage(
 
     dataset_cfg_by_id = {str(d.get("dataset_id", "")): d for d in cfg.get("datasets", [])}
     model_cfg_by_id = {str(m.get("model_id", "")): m for m in cfg.get("models", [])}
-    model_ids = _supported_model_ids(cfg)
+    model_ids = select_model_ids(
+        cfg,
+        supported_model_ids={"mlp", "sage", "pmp", "secgfd"},
+        requested_model_ids=selected_model_ids,
+    )
     if not model_ids:
-        raise RuntimeError("Shift stage requires at least one supported model_id in {'mlp', 'sage', 'pmp', 'secgfd'}.")
+        warn_no_matching_models("shift", selected_model_ids)
+        return
+
+    expected_keys = build_expected_run_keys(
+        filtered,
+        training_seeds=training_seeds,
+        model_ids=model_ids,
+        protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+    )
+    preflight = summarize_training_preflight(
+        results_csv,
+        expected_keys=expected_keys,
+        completed_keys=completed_keys,
+        skip_existing=bool(skip_existing),
+        model_ids=model_ids,
+        protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+    )
+    print_training_preflight(
+        variant_count=len(filtered),
+        training_seed_count=len(training_seeds),
+        model_ids=model_ids,
+        summary=preflight,
+    )
+    progress = ProgressTracker(stage_label="shift", total_runs=preflight.total_runs, already_done=preflight.already_done)
 
     all_groups = dict(_group_variants_by_split(variants))
     for (dataset_id, _split_id), group_variants in _group_variants_by_split(filtered):
@@ -305,6 +323,15 @@ def run_shift_stage(
                                 "error": clean_graph_error,
                             },
                         )
+                        progress.record(
+                            model_id=str(row_common["model_id"]),
+                            scenario_id=str(row_common["scenario_id"]),
+                            severity=float(row_common["severity"]),
+                            graph_seed=int(row_common["graph_seed"]),
+                            training_seed=int(row_common["training_seed"]),
+                            status="error",
+                            duration_sec=float(clean_graph_error_dt),
+                        )
                         completed_keys.add(run_key)
                     continue
 
@@ -338,6 +365,15 @@ def run_shift_stage(
                                 "error": train_error,
                             },
                         )
+                        progress.record(
+                            model_id=str(row_common["model_id"]),
+                            scenario_id=str(row_common["scenario_id"]),
+                            severity=float(row_common["severity"]),
+                            graph_seed=int(row_common["graph_seed"]),
+                            training_seed=int(row_common["training_seed"]),
+                            status="error",
+                            duration_sec=float(dt),
+                        )
                         completed_keys.add(run_key)
                     continue
 
@@ -362,6 +398,16 @@ def run_shift_stage(
                                 "error": "",
                             },
                         )
+                        progress.record(
+                            model_id=str(model_id),
+                            scenario_id=variant.scenario_id,
+                            severity=float(variant.severity),
+                            graph_seed=int(variant.graph_seed),
+                            training_seed=int(training_seed),
+                            status="ok",
+                            duration_sec=float(duration),
+                            roc_auc=float(out["roc_auc"]),
+                        )
                     except Exception as e:
                         dt = time.perf_counter() - eval_t0
                         if variant.scenario_id == "clean" and float(variant.severity) == 0.0:
@@ -374,6 +420,15 @@ def run_shift_stage(
                                 "status": "error",
                                 "error": truncate_error_message(e),
                             },
+                        )
+                        progress.record(
+                            model_id=str(model_id),
+                            scenario_id=variant.scenario_id,
+                            severity=float(variant.severity),
+                            graph_seed=int(variant.graph_seed),
+                            training_seed=int(training_seed),
+                            status="error",
+                            duration_sec=float(dt),
                         )
                     finally:
                         completed_keys.add(run_key)
