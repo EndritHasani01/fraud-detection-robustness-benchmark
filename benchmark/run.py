@@ -270,6 +270,11 @@ def main(argv: list[str] | None = None) -> int:
         default=0,
         help="Override SEC-GFD polynomial order d (0 = use config/default).",
     )
+    p.add_argument(
+        "--ci",
+        action="store_true",
+        help="For --stage plots, compute bootstrap 95% confidence intervals and use them for plot error bars.",
+    )
     args = p.parse_args(argv)
 
     config_path = Path(args.config)
@@ -400,6 +405,7 @@ def main(argv: list[str] | None = None) -> int:
                 only_clean=bool(args.only_clean),
                 max_variants=(None if int(args.max_variants) <= 0 else int(args.max_variants)),
                 max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
+                ci=bool(args.ci),
             )
         else:
             raise RuntimeError(f"Unknown stage: {args.stage}")

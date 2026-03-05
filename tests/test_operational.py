@@ -86,6 +86,28 @@ class RunModelsCliTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(stage_mock.call_args.kwargs["selected_model_ids"], ["mlp", "sage"])
 
+    def test_run_main_passes_ci_flag_to_plots_stage(self) -> None:
+        cfg = {"experiment_name": "exp"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch("benchmark.run.load_json", return_value=cfg):
+                with mock.patch("benchmark.run.validate_config"):
+                    with mock.patch("benchmark.plots_stage.run_plots_stage") as stage_mock:
+                        rc = main(
+                            [
+                                "--config",
+                                "dummy.json",
+                                "--out",
+                                tmpdir,
+                                "--stage",
+                                "plots",
+                                "--ci",
+                            ]
+                        )
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(stage_mock.call_args.kwargs["ci"])
+
 
 class StageModelFilterTests(unittest.TestCase):
     def test_pmp_stage_warns_and_exits_when_models_filter_excludes_pmp(self) -> None:

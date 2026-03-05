@@ -254,7 +254,7 @@ class PlotsProtocolCompletenessTests(unittest.TestCase):
                 "seeds": {"training_seeds": [42]},
             }
 
-            expected, missing_or_error = _completeness_report(
+            report = _completeness_report(
                 cfg,
                 out_dir=out_dir,
                 include_noop=True,
@@ -263,8 +263,10 @@ class PlotsProtocolCompletenessTests(unittest.TestCase):
                 max_training_seeds=None,
             )
 
-            self.assertEqual(expected, 1)
-            self.assertEqual(missing_or_error, 0)
+            self.assertEqual(report.total_expected, 1)
+            self.assertEqual(report.present_ok, 1)
+            self.assertEqual(report.missing_count, 0)
+            self.assertEqual(report.error_count, 0)
             report_rows = _read_csv_rows(out_dir / "plots" / "missing_or_error_runs.csv")
             self.assertEqual(report_rows, [])
 
