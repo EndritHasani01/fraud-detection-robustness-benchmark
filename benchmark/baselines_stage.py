@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .baselines import BaselineHParams, build_baseline
+from .config import get_training_seeds
 from .metrics import (
     average_precision_binary,
     best_f1_macro_threshold,
@@ -310,7 +311,7 @@ def run_baselines_stage(
     if not variants:
         raise RuntimeError(f"No rows found in {variants_csv}")
 
-    training_seeds = [int(s) for s in cfg["seeds"]["training_seeds"]]
+    training_seeds = get_training_seeds(cfg)
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 

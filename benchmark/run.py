@@ -4,7 +4,7 @@ import argparse
 import time
 from pathlib import Path
 
-from .config import ConfigError, init_paths, load_json, validate_config, write_json
+from .config import ConfigError, get_graph_seeds, init_paths, load_json, validate_config, write_json
 from .paths import base_graph_path, variant_graph_path
 from .results import VARIANTS_COLUMNS, append_csv_row, ensure_csv_header, ensure_results_csv
 
@@ -63,7 +63,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
     ensure_csv_header(paths.variants_csv_path, VARIANTS_COLUMNS, overwrite=force)
 
     experiment_name = cfg["experiment_name"]
-    graph_seeds = [int(s) for s in cfg["seeds"]["training_seeds"]]
+    graph_seeds = get_graph_seeds(cfg)
 
     for dataset_cfg in cfg["datasets"]:
         dataset_id = dataset_cfg["dataset_id"]

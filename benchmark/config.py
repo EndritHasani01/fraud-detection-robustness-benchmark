@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,45 @@ def load_json(path: Path) -> dict[str, Any]:
         raise ConfigError(f"Config file not found: {path}") from e
     except json.JSONDecodeError as e:
         raise ConfigError(f"Invalid JSON in config file: {path}") from e
+
+
+def _validated_seed_list(
+    seeds_cfg: dict[str, Any],
+    *,
+    key: str,
+    required: bool,
+) -> list[int]:
+    value = seeds_cfg.get(key)
+    if value is None:
+        if required:
+            raise ConfigError(f"seeds.{key} must be a non-empty list of integers")
+        return []
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"seeds.{key} must be a non-empty list of integers")
+
+    out: list[int] = []
+    for idx, raw in enumerate(value):
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise ConfigError(f"seeds.{key}[{idx}] must be an integer")
+        out.append(int(raw))
+    return out
+
+
+def get_training_seeds(cfg: dict[str, Any]) -> list[int]:
+    seeds_cfg = cfg.get("seeds")
+    if not isinstance(seeds_cfg, dict):
+        raise ConfigError("cfg['seeds'] must be an object")
+    return _validated_seed_list(seeds_cfg, key="training_seeds", required=True)
+
+
+def get_graph_seeds(cfg: dict[str, Any]) -> list[int]:
+    seeds_cfg = cfg.get("seeds")
+    if not isinstance(seeds_cfg, dict):
+        raise ConfigError("cfg['seeds'] must be an object")
+    graph_seeds = _validated_seed_list(seeds_cfg, key="graph_seeds", required=False)
+    if graph_seeds:
+        return graph_seeds
+    return get_training_seeds(cfg)
 
 
 def validate_config(cfg: dict[str, Any]) -> None:
@@ -56,9 +96,16 @@ def validate_config(cfg: dict[str, Any]) -> None:
         raise ConfigError("graph_representation.canonical_view must be 'homogeneous' or 'heterograph'")
 
     seeds = cfg["seeds"]
-    tr_seeds = seeds.get("training_seeds")
-    if not isinstance(tr_seeds, list) or not tr_seeds:
-        raise ConfigError("seeds.training_seeds must be a non-empty list")
+    if not isinstance(seeds, dict):
+        raise ConfigError("cfg['seeds'] must be an object")
+
+    if "training_seeds" not in seeds and "graph_seeds" not in seeds:
+        print(
+            "[config] WARNING: config is missing both seeds.training_seeds and seeds.graph_seeds.",
+            file=sys.stderr,
+        )
+    _validated_seed_list(seeds, key="training_seeds", required=True)
+    _validated_seed_list(seeds, key="graph_seeds", required=False)
 
     eval_cfg = cfg["evaluation"]
     metrics = eval_cfg.get("metrics")
@@ -83,4 +130,3 @@ def write_json(path: Path, obj: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as f:
         json.dump(obj, f, indent=2, sort_keys=True)
         f.write("\n")
-

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .config import get_training_seeds
 from .results import PROTOCOL_TRAIN_ON_VARIANT, normalize_protocol
 
 
@@ -160,7 +161,7 @@ def _completeness_report(
     if max_variants is not None:
         expected_variant_rows = expected_variant_rows[: int(max_variants)]
 
-    training_seeds = [int(s) for s in cfg.get("seeds", {}).get("training_seeds", [])]
+    training_seeds = get_training_seeds(cfg)
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .config import get_training_seeds
 from .metrics import average_precision_binary, best_f1_macro_threshold, f1_macro_at_threshold, roc_auc_binary
 from .results import (
     PROTOCOL_TRAIN_ON_VARIANT,
@@ -507,7 +508,7 @@ def run_pmp_stage(
     if not repo_root.exists():
         raise FileNotFoundError(f"Configured PMP repo_path does not exist: {repo_root}")
 
-    training_seeds = [int(s) for s in cfg["seeds"]["training_seeds"]]
+    training_seeds = get_training_seeds(cfg)
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 
