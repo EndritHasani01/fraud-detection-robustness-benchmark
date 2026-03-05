@@ -102,7 +102,7 @@ class StageModelFilterTests(unittest.TestCase):
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                with mock.patch("benchmark.pmp_stage._load_graph_bin", side_effect=AssertionError("should not load")):
+                with mock.patch("benchmark.pmp_stage.load_graph_bin", side_effect=AssertionError("should not load")):
                     with mock.patch("benchmark.pmp_stage.train_eval_pmp") as train_mock:
                         run_pmp_stage(
                             cfg,

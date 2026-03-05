@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .config import get_graph_seeds
 from .results import RunKey, make_run_key, normalize_protocol, row_run_key
+from .variants import filter_variants
 
 
 def parse_requested_model_ids(raw: str | None) -> list[str] | None:
@@ -74,18 +75,12 @@ def filter_variant_rows(
     only_clean: bool,
     max_variants: int | None,
 ) -> list[Any]:
-    filtered: list[Any] = []
-    for variant in variants:
-        scenario_id = str(getattr(variant, "scenario_id"))
-        scenario_applied = bool(getattr(variant, "scenario_applied"))
-        if only_clean and scenario_id != "clean":
-            continue
-        if (not include_noop) and (not scenario_applied) and scenario_id != "clean":
-            continue
-        filtered.append(variant)
-    if max_variants is not None:
-        filtered = filtered[: int(max_variants)]
-    return filtered
+    return filter_variants(
+        variants,
+        include_noop=include_noop,
+        only_clean=only_clean,
+        max_variants=max_variants,
+    )
 
 
 def build_expected_run_keys(

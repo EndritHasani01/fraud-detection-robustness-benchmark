@@ -6,9 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from .baselines_stage import (
-    VariantRow,
-    _load_graph_bin,
-    _read_variants_csv,
     build_baseline_hparams,
     eval_baseline_model,
     train_baseline_model,
@@ -17,7 +14,6 @@ from .config import get_training_seeds
 from .preflight import (
     ProgressTracker,
     build_expected_run_keys,
-    filter_variant_rows,
     print_training_preflight,
     select_model_ids,
     summarize_training_preflight,
@@ -26,11 +22,10 @@ from .preflight import (
 from .pmp_stage import eval_pmp_model, resolve_pmp_config, train_pmp_model
 from .results import (
     PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
-    append_result_row,
     ensure_results_csv,
     load_completed_keys,
     make_run_key,
-    truncate_error_message,
+    write_result_row,
 )
 from .secgfd_stage import (
     eval_secgfd_model,
@@ -39,6 +34,7 @@ from .secgfd_stage import (
     train_secgfd_model,
 )
 from .summarize import summarize_results_by_training_seed
+from .variants import VariantRow, filter_variants, load_graph_bin, read_variants_csv
 
 
 def _supported_model_ids(cfg: dict[str, Any]) -> list[str]:
@@ -192,11 +188,11 @@ def run_shift_stage(
     ensure_results_csv(results_csv, overwrite=bool(force))
     completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
-    variants = _read_variants_csv(variants_csv)
+    variants = read_variants_csv(variants_csv)
     if not variants:
         raise RuntimeError(f"No rows found in {variants_csv}")
 
-    filtered = filter_variant_rows(
+    filtered = filter_variants(
         variants,
         include_noop=bool(include_noop),
         only_clean=bool(only_clean),
@@ -258,31 +254,9 @@ def run_shift_stage(
 
         for model_id in model_ids:
             for training_seed in training_seeds:
-                pending_variants: list[tuple[VariantRow, tuple[str, str, str, float, int, int, str, str], dict[str, Any]]] = []
+                pending_variants: list[tuple[VariantRow, tuple[str, str, str, float, int, int, str, str]]] = []
 
                 for v in group_variants:
-                    row_common = {
-                        "experiment_name": v.experiment_name,
-                        "dataset_id": v.dataset_id,
-                        "split_id": v.split_id,
-                        "graph_seed": int(v.graph_seed),
-                        "training_seed": int(training_seed),
-                        "scenario_id": v.scenario_id,
-                        "severity": float(v.severity),
-                        "model_id": str(model_id),
-                        "protocol": PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
-                        "n_nodes": int(v.n_nodes),
-                        "n_edges": int(v.n_edges),
-                        "mean_in_degree": float(v.mean_in_degree),
-                        "median_in_degree": float(v.median_in_degree),
-                        "mean_out_degree": float(v.mean_out_degree),
-                        "median_out_degree": float(v.median_out_degree),
-                        "heterophily_ratio": v.heterophily_ratio,
-                        "pos_rate": v.pos_rate,
-                        "base_graph_path": v.base_graph_path,
-                        "graph_path": v.graph_path,
-                        "train_graph_ref": clean_graph_path,
-                    }
                     run_key = make_run_key(
                         dataset_id=v.dataset_id,
                         split_id=v.split_id,
@@ -299,7 +273,7 @@ def run_shift_stage(
                             f"gs={int(v.graph_seed)} / ts={int(training_seed)} already done"
                         )
                         continue
-                    pending_variants.append((v, run_key, row_common))
+                    pending_variants.append((v, run_key))
 
                 if not pending_variants:
                     continue
@@ -307,28 +281,30 @@ def run_shift_stage(
                 if clean_graph is None and clean_graph_error is None:
                     clean_load_t0 = time.perf_counter()
                     try:
-                        clean_graph = _load_graph_bin(Path(clean_graph_path))
+                        clean_graph = load_graph_bin(Path(clean_graph_path))
                     except Exception as e:
                         clean_graph_error = truncate_error_message(e)
                         clean_graph_error_dt = time.perf_counter() - clean_load_t0
 
                 if clean_graph_error is not None:
-                    for _variant, run_key, row_common in pending_variants:
-                        append_result_row(
+                    for variant, run_key in pending_variants:
+                        write_result_row(
                             results_csv,
-                            {
-                                **row_common,
-                                "duration_sec": float(clean_graph_error_dt),
-                                "status": "error",
-                                "error": clean_graph_error,
-                            },
+                            variant,
+                            model_id=str(model_id),
+                            training_seed=int(training_seed),
+                            protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                            metrics=None,
+                            error=clean_graph_error,
+                            duration_sec=float(clean_graph_error_dt),
+                            train_graph_ref=clean_graph_path,
                         )
                         progress.record(
-                            model_id=str(row_common["model_id"]),
-                            scenario_id=str(row_common["scenario_id"]),
-                            severity=float(row_common["severity"]),
-                            graph_seed=int(row_common["graph_seed"]),
-                            training_seed=int(row_common["training_seed"]),
+                            model_id=str(model_id),
+                            scenario_id=variant.scenario_id,
+                            severity=float(variant.severity),
+                            graph_seed=int(variant.graph_seed),
+                            training_seed=int(training_seed),
                             status="error",
                             duration_sec=float(clean_graph_error_dt),
                         )
@@ -355,48 +331,47 @@ def run_shift_stage(
                 except Exception as e:
                     train_error = truncate_error_message(e)
                     dt = time.perf_counter() - train_t0
-                    for _variant, run_key, row_common in pending_variants:
-                        append_result_row(
+                    for variant, run_key in pending_variants:
+                        write_result_row(
                             results_csv,
-                            {
-                                **row_common,
-                                "duration_sec": float(dt),
-                                "status": "error",
-                                "error": train_error,
-                            },
+                            variant,
+                            model_id=str(model_id),
+                            training_seed=int(training_seed),
+                            protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                            metrics=None,
+                            error=train_error,
+                            duration_sec=float(dt),
+                            train_graph_ref=clean_graph_path,
                         )
                         progress.record(
-                            model_id=str(row_common["model_id"]),
-                            scenario_id=str(row_common["scenario_id"]),
-                            severity=float(row_common["severity"]),
-                            graph_seed=int(row_common["graph_seed"]),
-                            training_seed=int(row_common["training_seed"]),
+                            model_id=str(model_id),
+                            scenario_id=variant.scenario_id,
+                            severity=float(variant.severity),
+                            graph_seed=int(variant.graph_seed),
+                            training_seed=int(training_seed),
                             status="error",
                             duration_sec=float(dt),
                         )
                         completed_keys.add(run_key)
                     continue
 
-                for variant, run_key, row_common in pending_variants:
+                for variant, run_key in pending_variants:
                     eval_t0 = time.perf_counter()
                     try:
-                        eval_graph = _load_graph_bin(Path(variant.graph_path))
+                        eval_graph = load_graph_bin(Path(variant.graph_path))
                         out = _eval_shift_artifact(model_id, artifact, eval_graph)
                         duration = float(out["duration_sec"])
                         if variant.scenario_id == "clean" and float(variant.severity) == 0.0:
                             duration += float(train_dt)
-                        append_result_row(
+                        write_result_row(
                             results_csv,
-                            {
-                                **row_common,
-                                "roc_auc": out["roc_auc"],
-                                "average_precision": out["average_precision"],
-                                "f1_macro": out["f1_macro"],
-                                "threshold": out["threshold"],
-                                "duration_sec": duration,
-                                "status": "ok",
-                                "error": "",
-                            },
+                            variant,
+                            model_id=str(model_id),
+                            training_seed=int(training_seed),
+                            protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                            metrics=out,
+                            duration_sec=float(duration),
+                            train_graph_ref=clean_graph_path,
                         )
                         progress.record(
                             model_id=str(model_id),
@@ -412,14 +387,16 @@ def run_shift_stage(
                         dt = time.perf_counter() - eval_t0
                         if variant.scenario_id == "clean" and float(variant.severity) == 0.0:
                             dt += float(train_dt)
-                        append_result_row(
+                        write_result_row(
                             results_csv,
-                            {
-                                **row_common,
-                                "duration_sec": float(dt),
-                                "status": "error",
-                                "error": truncate_error_message(e),
-                            },
+                            variant,
+                            model_id=str(model_id),
+                            training_seed=int(training_seed),
+                            protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                            metrics=None,
+                            error=e,
+                            duration_sec=float(dt),
+                            train_graph_ref=clean_graph_path,
                         )
                         progress.record(
                             model_id=str(model_id),

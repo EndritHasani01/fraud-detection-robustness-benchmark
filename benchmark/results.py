@@ -211,6 +211,84 @@ def append_result_row(path: Path, row: Mapping[str, Any]) -> None:
     append_csv_row(path, RESULTS_COLUMNS, row, row_defaults=RESULTS_COLUMN_DEFAULTS)
 
 
+def build_result_row_common(
+    variant: Any,
+    *,
+    model_id: str,
+    training_seed: int,
+    protocol: str,
+    train_graph_ref: Any | None = None,
+) -> dict[str, Any]:
+    graph_ref = getattr(variant, "graph_path", "") if train_graph_ref is None else train_graph_ref
+    return {
+        "experiment_name": getattr(variant, "experiment_name", ""),
+        "dataset_id": getattr(variant, "dataset_id", ""),
+        "split_id": getattr(variant, "split_id", ""),
+        "graph_seed": int(getattr(variant, "graph_seed", 0)),
+        "training_seed": int(training_seed),
+        "scenario_id": getattr(variant, "scenario_id", ""),
+        "severity": float(getattr(variant, "severity", 0.0)),
+        "model_id": str(model_id),
+        "protocol": normalize_protocol(protocol),
+        "n_nodes": int(getattr(variant, "n_nodes", 0)),
+        "n_edges": int(getattr(variant, "n_edges", 0)),
+        "mean_in_degree": float(getattr(variant, "mean_in_degree", 0.0)),
+        "median_in_degree": float(getattr(variant, "median_in_degree", 0.0)),
+        "mean_out_degree": float(getattr(variant, "mean_out_degree", 0.0)),
+        "median_out_degree": float(getattr(variant, "median_out_degree", 0.0)),
+        "heterophily_ratio": getattr(variant, "heterophily_ratio", None),
+        "pos_rate": getattr(variant, "pos_rate", None),
+        "base_graph_path": getattr(variant, "base_graph_path", ""),
+        "graph_path": getattr(variant, "graph_path", ""),
+        "train_graph_ref": graph_ref,
+    }
+
+
+def write_result_row(
+    results_csv: Path,
+    variant: Any,
+    *,
+    model_id: str,
+    training_seed: int,
+    protocol: str,
+    metrics: Mapping[str, Any] | None,
+    error: Any = "",
+    duration_sec: float | None = None,
+    train_graph_ref: Any | None = None,
+) -> None:
+    row = build_result_row_common(
+        variant,
+        model_id=model_id,
+        training_seed=training_seed,
+        protocol=protocol,
+        train_graph_ref=train_graph_ref,
+    )
+    if metrics is None:
+        row.update(
+            {
+                "duration_sec": float(0.0 if duration_sec is None else duration_sec),
+                "status": "error",
+                "error": truncate_error_message(error),
+            }
+        )
+    else:
+        effective_duration = metrics.get("duration_sec", "")
+        if duration_sec is not None:
+            effective_duration = float(duration_sec)
+        row.update(
+            {
+                "roc_auc": metrics.get("roc_auc", ""),
+                "average_precision": metrics.get("average_precision", ""),
+                "f1_macro": metrics.get("f1_macro", ""),
+                "threshold": metrics.get("threshold", ""),
+                "duration_sec": effective_duration,
+                "status": "ok",
+                "error": "",
+            }
+        )
+    append_result_row(results_csv, row)
+
+
 def load_completed_keys(path: Path, *, retry_errors: bool = False) -> set[RunKey]:
     ensure_results_csv(path, overwrite=False)
 

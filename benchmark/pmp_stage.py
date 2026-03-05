@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import math
 import sys
 import time
@@ -13,7 +12,6 @@ from .metrics import average_precision_binary, best_f1_macro_threshold, f1_macro
 from .preflight import (
     ProgressTracker,
     build_expected_run_keys,
-    filter_variant_rows,
     print_training_preflight,
     select_model_ids,
     summarize_training_preflight,
@@ -21,36 +19,20 @@ from .preflight import (
 )
 from .results import (
     PROTOCOL_TRAIN_ON_VARIANT,
-    append_result_row,
     ensure_results_csv,
     load_completed_keys,
     make_run_key,
-    truncate_error_message,
+    write_result_row,
 )
 from .summarize import summarize_results_by_training_seed
-
-
-@dataclass(frozen=True)
-class VariantRow:
-    experiment_name: str
-    dataset_id: str
-    split_id: str
-    graph_seed: int
-    scenario_id: str
-    severity: float
-    oracle_labels: bool
-    scenario_applied: bool
-    base_graph_path: str
-    graph_path: str
-    # graph stats copied from graph_variants.csv
-    n_nodes: int
-    n_edges: int
-    mean_in_degree: float
-    median_in_degree: float
-    mean_out_degree: float
-    median_out_degree: float
-    heterophily_ratio: float | None
-    pos_rate: float | None
+from .variants import (
+    VariantRow,
+    class_weights_from_train_labels,
+    filter_variants,
+    load_graph_bin,
+    read_variants_csv,
+    set_seeds,
+)
 
 
 @dataclass(frozen=True)
@@ -60,93 +42,6 @@ class PMPModelArtifact:
     state_dict: dict[str, Any]
     threshold: float
     device: str
-
-
-def _parse_bool(x: Any) -> bool:
-    if isinstance(x, bool):
-        return bool(x)
-    s = str(x).strip().lower()
-    return s in {"1", "true", "t", "yes", "y"}
-
-
-def _safe_int(x: Any, default: int = 0) -> int:
-    try:
-        return int(float(x))
-    except Exception:
-        return int(default)
-
-
-def _safe_float(x: Any, default: float | None = None) -> float | None:
-    try:
-        return float(x)
-    except Exception:
-        return default
-
-
-def _read_variants_csv(path: Path) -> list[VariantRow]:
-    if not path.exists():
-        raise FileNotFoundError(f"graph_variants.csv not found: {path}")
-
-    rows: list[VariantRow] = []
-    with path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            rows.append(
-                VariantRow(
-                    experiment_name=str(r.get("experiment_name", "")),
-                    dataset_id=str(r.get("dataset_id", "")),
-                    split_id=str(r.get("split_id", "")),
-                    graph_seed=_safe_int(r.get("graph_seed", 0)),
-                    scenario_id=str(r.get("scenario_id", "")),
-                    severity=float(r.get("severity", 0.0) or 0.0),
-                    oracle_labels=_parse_bool(r.get("oracle_labels", False)),
-                    scenario_applied=_parse_bool(r.get("scenario_applied", True)),
-                    base_graph_path=str(r.get("base_graph_path", "")),
-                    graph_path=str(r.get("graph_path", "")),
-                    n_nodes=_safe_int(r.get("n_nodes", 0)),
-                    n_edges=_safe_int(r.get("n_edges", 0)),
-                    mean_in_degree=float(r.get("mean_in_degree", 0.0) or 0.0),
-                    median_in_degree=float(r.get("median_in_degree", 0.0) or 0.0),
-                    mean_out_degree=float(r.get("mean_out_degree", 0.0) or 0.0),
-                    median_out_degree=float(r.get("median_out_degree", 0.0) or 0.0),
-                    heterophily_ratio=_safe_float(r.get("heterophily_ratio", ""), None),
-                    pos_rate=_safe_float(r.get("pos_rate", ""), None),
-                )
-            )
-    return rows
-
-
-def _set_seeds(seed: int) -> None:
-    import random
-
-    import numpy as np
-    import torch
-
-    random.seed(int(seed))
-    np.random.seed(int(seed))
-    torch.manual_seed(int(seed))
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(int(seed))
-
-    try:
-        import dgl
-
-        dgl.seed(int(seed))
-        dgl.random.seed(int(seed))
-    except Exception:
-        pass
-
-
-def _load_graph_bin(path: Path):
-    try:
-        from dgl.data.utils import load_graphs
-    except Exception as e:  # pragma: no cover
-        raise RuntimeError("DGL is required to load cached graphs for PMP evaluation.") from e
-
-    graphs, _ = load_graphs(str(path))
-    if not graphs:
-        raise RuntimeError(f"No graphs found in file: {path}")
-    return graphs[0]
 
 
 def _row_normalize_features(x, *, eps: float = 0.01):
@@ -233,21 +128,6 @@ def resolve_pmp_config(
     resolved = dict(cfg_pmp)
     resolved.update(raw_hparams)
     return resolved
-
-
-def _class_weights_from_train_labels(y_train):
-    import torch
-
-    y_train = y_train.to(torch.int64)
-    n_pos = int((y_train == 1).sum().item())
-    n_neg = int((y_train == 0).sum().item())
-    if n_pos <= 0 or n_neg <= 0:
-        return None
-    w0 = 1.0
-    w1 = float(n_neg) / float(n_pos)
-    return torch.tensor([w0, w1], dtype=torch.float32)
-
-
 def _resolve_pmp_num_workers(cfg_pmp: dict[str, Any]) -> int:
     if sys.platform.startswith("win"):
         return 0
@@ -427,7 +307,7 @@ def train_pmp_model(
 
     import torch
 
-    _set_seeds(int(training_seed))
+    set_seeds(int(training_seed))
 
     orig_x = g.ndata.get("feature")
     if orig_x is None:
@@ -461,7 +341,7 @@ def train_pmp_model(
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
         y_train = y[train_idx]
-        class_w = _class_weights_from_train_labels(y_train)
+        class_w = class_weights_from_train_labels(y_train)
         if class_w is not None:
             class_w = class_w.to(effective_device)
 
@@ -635,7 +515,7 @@ def run_pmp_stage(
     ensure_results_csv(results_csv, overwrite=bool(force))
     completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
-    variants = _read_variants_csv(variants_csv)
+    variants = read_variants_csv(variants_csv)
     if not variants:
         raise RuntimeError(f"No rows found in {variants_csv}")
 
@@ -666,7 +546,7 @@ def run_pmp_stage(
     if max_training_seeds is not None:
         training_seeds = training_seeds[: int(max_training_seeds)]
 
-    filtered = filter_variant_rows(
+    filtered = filter_variants(
         variants,
         include_noop=bool(include_noop),
         only_clean=bool(only_clean),
@@ -697,31 +577,9 @@ def run_pmp_stage(
     progress = ProgressTracker(stage_label="pmp", total_runs=preflight.total_runs, already_done=preflight.already_done)
 
     for v in filtered:
-        pending_runs: list[tuple[int, tuple[str, str, str, float, int, int, str, str], dict[str, Any]]] = []
+        pending_runs: list[tuple[int, tuple[str, str, str, float, int, int, str, str]]] = []
 
         for training_seed in training_seeds:
-            row_common = {
-                "experiment_name": v.experiment_name,
-                "dataset_id": v.dataset_id,
-                "split_id": v.split_id,
-                "graph_seed": int(v.graph_seed),
-                "training_seed": int(training_seed),
-                "scenario_id": v.scenario_id,
-                "severity": float(v.severity),
-                "model_id": "pmp",
-                "protocol": protocol,
-                "n_nodes": int(v.n_nodes),
-                "n_edges": int(v.n_edges),
-                "mean_in_degree": float(v.mean_in_degree),
-                "median_in_degree": float(v.median_in_degree),
-                "mean_out_degree": float(v.mean_out_degree),
-                "median_out_degree": float(v.median_out_degree),
-                "heterophily_ratio": v.heterophily_ratio,
-                "pos_rate": v.pos_rate,
-                "base_graph_path": v.base_graph_path,
-                "graph_path": v.graph_path,
-                "train_graph_ref": v.graph_path,
-            }
             run_key = make_run_key(
                 dataset_id=v.dataset_id,
                 split_id=v.split_id,
@@ -738,7 +596,7 @@ def run_pmp_stage(
                     f"gs={int(v.graph_seed)} / ts={int(training_seed)} already done"
                 )
                 continue
-            pending_runs.append((int(training_seed), run_key, row_common))
+            pending_runs.append((int(training_seed), run_key))
 
         if not pending_runs:
             continue
@@ -754,33 +612,33 @@ def run_pmp_stage(
 
         graph_t0 = time.perf_counter()
         try:
-            g = _load_graph_bin(Path(v.graph_path))
+            g = load_graph_bin(Path(v.graph_path))
         except Exception as e:
-            graph_error = truncate_error_message(e)
             dt = time.perf_counter() - graph_t0
-            for _training_seed, run_key, row_common in pending_runs:
-                append_result_row(
+            for training_seed, run_key in pending_runs:
+                write_result_row(
                     results_csv,
-                    {
-                        **row_common,
-                        "duration_sec": float(dt),
-                        "status": "error",
-                        "error": graph_error,
-                    },
+                    v,
+                    model_id="pmp",
+                    training_seed=int(training_seed),
+                    protocol=protocol,
+                    metrics=None,
+                    error=e,
+                    duration_sec=float(dt),
                 )
                 progress.record(
                     model_id="pmp",
-                    scenario_id=str(row_common["scenario_id"]),
-                    severity=float(row_common["severity"]),
-                    graph_seed=int(row_common["graph_seed"]),
-                    training_seed=int(row_common["training_seed"]),
+                    scenario_id=v.scenario_id,
+                    severity=float(v.severity),
+                    graph_seed=int(v.graph_seed),
+                    training_seed=int(training_seed),
                     status="error",
                     duration_sec=float(dt),
                 )
                 completed_keys.add(run_key)
             continue
 
-        for training_seed, run_key, row_common in pending_runs:
+        for training_seed, run_key in pending_runs:
             run_t0 = time.perf_counter()
             try:
                 out = train_eval_pmp(
@@ -792,18 +650,13 @@ def run_pmp_stage(
                     max_epochs=max_epochs,
                     patience=patience,
                 )
-                append_result_row(
+                write_result_row(
                     results_csv,
-                    {
-                        **row_common,
-                        "roc_auc": out["roc_auc"],
-                        "average_precision": out["average_precision"],
-                        "f1_macro": out["f1_macro"],
-                        "threshold": out["threshold"],
-                        "duration_sec": out["duration_sec"],
-                        "status": "ok",
-                        "error": "",
-                    },
+                    v,
+                    model_id="pmp",
+                    training_seed=int(training_seed),
+                    protocol=protocol,
+                    metrics=out,
                 )
                 progress.record(
                     model_id="pmp",
@@ -817,14 +670,15 @@ def run_pmp_stage(
                 )
             except Exception as e:
                 dt = time.perf_counter() - run_t0
-                append_result_row(
+                write_result_row(
                     results_csv,
-                    {
-                        **row_common,
-                        "duration_sec": dt,
-                        "status": "error",
-                        "error": truncate_error_message(e),
-                    },
+                    v,
+                    model_id="pmp",
+                    training_seed=int(training_seed),
+                    protocol=protocol,
+                    metrics=None,
+                    error=e,
+                    duration_sec=float(dt),
                 )
                 progress.record(
                     model_id="pmp",

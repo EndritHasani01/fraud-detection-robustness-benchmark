@@ -127,7 +127,7 @@ class ShiftStageTests(unittest.TestCase):
                 },
             ]
 
-            with mock.patch("benchmark.shift_stage._load_graph_bin", side_effect=load_graph_side_effect) as load_mock:
+            with mock.patch("benchmark.shift_stage.load_graph_bin", side_effect=load_graph_side_effect) as load_mock:
                 with mock.patch("benchmark.shift_stage.train_baseline_model", return_value="artifact") as train_mock:
                     with mock.patch("benchmark.shift_stage.eval_baseline_model", side_effect=eval_outputs) as eval_mock:
                         with mock.patch("benchmark.shift_stage.summarize_results_by_training_seed") as summary_mock:

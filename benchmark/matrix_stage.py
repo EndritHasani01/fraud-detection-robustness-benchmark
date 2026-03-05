@@ -6,13 +6,13 @@ from typing import Any
 from .config import get_training_seeds
 from .preflight import (
     build_expected_run_keys,
-    filter_variant_rows,
     print_training_preflight,
     select_model_ids,
     summarize_training_preflight,
     warn_no_matching_models,
 )
 from .results import PROTOCOL_TRAIN_CLEAN_EVAL_ALL, PROTOCOL_TRAIN_ON_VARIANT, load_completed_keys
+from .variants import filter_variants, read_variants_csv
 
 
 def run_matrix_stage(
@@ -52,8 +52,6 @@ def run_matrix_stage(
             f"Missing {variants_csv}. Run `py -m benchmark.run --stage graphs ...` first (same --out directory)."
         )
 
-    from .baselines_stage import _read_variants_csv
-
     configured_integrated_model_ids = select_model_ids(
         cfg,
         supported_model_ids={"mlp", "sage", "pmp", "secgfd"},
@@ -69,8 +67,8 @@ def run_matrix_stage(
         warn_no_matching_models("matrix", selected_model_ids)
         return
 
-    variants = _read_variants_csv(variants_csv)
-    filtered_variants = filter_variant_rows(
+    variants = read_variants_csv(variants_csv)
+    filtered_variants = filter_variants(
         variants,
         include_noop=bool(include_noop),
         only_clean=bool(only_clean),

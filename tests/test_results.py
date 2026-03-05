@@ -4,6 +4,7 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from benchmark.baselines_stage import run_baselines_stage
@@ -12,8 +13,10 @@ from benchmark.results import (
     RESULTS_COLUMN_DEFAULTS,
     RESULTS_COLUMNS,
     ensure_csv_header,
+    ensure_results_csv,
     load_completed_keys,
     make_run_key,
+    write_result_row,
 )
 
 
@@ -135,6 +138,54 @@ class ResultsCsvTests(unittest.TestCase):
             self.assertIn(error_key, completed_default)
             self.assertNotIn(error_key, completed_retry)
 
+    def test_write_result_row_builds_consistent_variant_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "results.csv"
+            ensure_results_csv(path)
+
+            variant = SimpleNamespace(
+                experiment_name="exp",
+                dataset_id="yelpchi",
+                split_id="split_0",
+                graph_seed=7,
+                scenario_id="noise_edges",
+                severity=0.2,
+                n_nodes=10,
+                n_edges=12,
+                mean_in_degree=1.2,
+                median_in_degree=1.0,
+                mean_out_degree=1.2,
+                median_out_degree=1.0,
+                heterophily_ratio=0.3,
+                pos_rate=0.2,
+                base_graph_path="base.bin",
+                graph_path="noise.bin",
+            )
+
+            write_result_row(
+                path,
+                variant,
+                model_id="mlp",
+                training_seed=42,
+                protocol=PROTOCOL_TRAIN_ON_VARIANT,
+                metrics={
+                    "roc_auc": 0.91,
+                    "average_precision": 0.87,
+                    "f1_macro": 0.66,
+                    "threshold": 0.5,
+                    "duration_sec": 1.25,
+                },
+                train_graph_ref="clean.bin",
+            )
+
+            rows = self._read_csv_rows(path)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["dataset_id"], "yelpchi")
+            self.assertEqual(rows[0]["graph_path"], "noise.bin")
+            self.assertEqual(rows[0]["train_graph_ref"], "clean.bin")
+            self.assertEqual(rows[0]["protocol"], PROTOCOL_TRAIN_ON_VARIANT)
+            self.assertEqual(rows[0]["status"], "ok")
+
     def test_baselines_stage_skips_completed_rows_before_graph_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir)
@@ -162,7 +213,7 @@ class ResultsCsvTests(unittest.TestCase):
                 "models": [{"model_id": "mlp"}],
             }
 
-            with mock.patch("benchmark.baselines_stage._load_graph_bin", side_effect=AssertionError("should skip")):
+            with mock.patch("benchmark.baselines_stage.load_graph_bin", side_effect=AssertionError("should skip")):
                 with mock.patch("benchmark.baselines_stage.train_eval_baseline") as train_mock:
                     with mock.patch("benchmark.baselines_stage.summarize_results_by_training_seed"):
                         run_baselines_stage(
@@ -213,7 +264,7 @@ class ResultsCsvTests(unittest.TestCase):
                 "models": [{"model_id": "mlp"}],
             }
 
-            with mock.patch("benchmark.baselines_stage._load_graph_bin", return_value=object()) as load_mock:
+            with mock.patch("benchmark.baselines_stage.load_graph_bin", return_value=object()) as load_mock:
                 with mock.patch(
                     "benchmark.baselines_stage.train_eval_baseline",
                     return_value={

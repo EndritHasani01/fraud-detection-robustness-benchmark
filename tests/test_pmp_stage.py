@@ -154,7 +154,7 @@ class PmpStageTests(unittest.TestCase):
             }
 
             with mock.patch("benchmark.pmp_stage._load_pmp_yaml_config", return_value=yaml_cfg):
-                with mock.patch("benchmark.pmp_stage._load_graph_bin", return_value=object()):
+                with mock.patch("benchmark.pmp_stage.load_graph_bin", return_value=object()):
                     with mock.patch(
                         "benchmark.pmp_stage.train_eval_pmp",
                         return_value={
@@ -215,7 +215,7 @@ class PmpStageTests(unittest.TestCase):
             }
 
             with mock.patch("benchmark.pmp_stage._load_pmp_yaml_config", return_value={"epochs": 500, "patience": 100}):
-                with mock.patch("benchmark.pmp_stage._load_graph_bin", return_value=object()):
+                with mock.patch("benchmark.pmp_stage.load_graph_bin", return_value=object()):
                     with mock.patch(
                         "benchmark.pmp_stage.train_eval_pmp",
                         return_value={
@@ -268,7 +268,7 @@ class PmpShiftStageTests(unittest.TestCase):
             }
             resolved_cfg = {"full_neighbors": False, "sampled_neighbors": [10], "epochs": 25}
 
-            with mock.patch("benchmark.shift_stage._load_graph_bin", return_value=object()):
+            with mock.patch("benchmark.shift_stage.load_graph_bin", return_value=object()):
                 with mock.patch("benchmark.shift_stage.resolve_pmp_config", return_value=resolved_cfg) as cfg_mock:
                     with mock.patch("benchmark.shift_stage.train_pmp_model", return_value="artifact") as train_mock:
                         with mock.patch(

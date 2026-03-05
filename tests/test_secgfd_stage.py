@@ -115,7 +115,7 @@ class SecgfdStageTests(unittest.TestCase):
                 ],
             }
 
-            with mock.patch("benchmark.secgfd_stage._load_graph_bin", return_value=object()):
+            with mock.patch("benchmark.secgfd_stage.load_graph_bin", return_value=object()):
                 with mock.patch(
                     "benchmark.secgfd_stage.train_eval_secgfd",
                     return_value={
@@ -170,7 +170,7 @@ class SecgfdStageTests(unittest.TestCase):
                 ],
             }
 
-            with mock.patch("benchmark.secgfd_stage._load_graph_bin", return_value=object()):
+            with mock.patch("benchmark.secgfd_stage.load_graph_bin", return_value=object()):
                 with mock.patch(
                     "benchmark.secgfd_stage.train_eval_secgfd",
                     return_value={
