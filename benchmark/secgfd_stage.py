@@ -44,6 +44,20 @@ class VariantRow:
     pos_rate: float | None
 
 
+@dataclass(frozen=True)
+class SECGFDModelArtifact:
+    repo_root: Path
+    state_dict: dict[str, Any]
+    threshold: float
+    device: str
+    hid_dim: int
+    order_d: int
+    high_order: int
+    lemda: float
+    lr: float
+    weight_decay: float
+
+
 def _parse_bool(x: Any) -> bool:
     if isinstance(x, bool):
         return bool(x)
@@ -189,7 +203,41 @@ def _nce_loss_fixed(emb, features, labels, train_idx, *, eps: float = 1e-8):
     return -torch.log((nor + float(eps)) / (abn + float(eps)))
 
 
-def train_eval_secgfd(
+def _resolve_secgfd_graph_device(g, *, device: str):
+    import torch
+
+    if device not in {"cpu", "cuda"}:
+        raise ValueError("device must be 'cpu' or 'cuda'")
+    if device == "cuda" and not torch.cuda.is_available():
+        device = "cpu"
+
+    if device == "cuda":
+        try:
+            g = g.to("cuda")
+        except Exception:
+            device = "cpu"
+            g = g.to("cpu")
+    else:
+        g = g.to("cpu")
+    return g, str(device)
+
+
+def _build_secgfd_model(
+    g,
+    *,
+    repo_root: Path,
+    device: str,
+    hid_dim: int,
+    order_d: int,
+    high_order: int,
+):
+    SECGFD = _import_secgfd_class(repo_root)
+    in_dim = int(g.ndata["feature"].shape[1])
+    model = SECGFD(in_dim, int(hid_dim), 2, g, d=int(order_d), high_order=int(high_order)).to(device)
+    return model
+
+
+def train_secgfd_model(
     g,
     *,
     repo_root: Path,
@@ -203,45 +251,30 @@ def train_eval_secgfd(
     lemda: float = 0.2,
     lr: float = 0.01,
     weight_decay: float = 0.0,
-) -> dict[str, Any]:
+) -> SECGFDModelArtifact:
     import copy
 
     import torch
     import torch.nn.functional as F
 
-    t0 = time.perf_counter()
     _set_seeds(int(training_seed))
-
-    if device not in {"cpu", "cuda"}:
-        raise ValueError("device must be 'cpu' or 'cuda'")
-    if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
-
-    if device == "cuda":
-        # SEC-GFD is full-graph; if the DGL wheel is CPU-only, this will fail.
-        try:
-            g = g.to("cuda")
-        except Exception:
-            device = "cpu"
-            g = g.to("cpu")
-    else:
-        g = g.to("cpu")
+    g, effective_device = _resolve_secgfd_graph_device(g, device=device)
 
     features = g.ndata.get("feature")
     labels = g.ndata.get("label")
     if features is None or labels is None:
         raise RuntimeError("Graph missing ndata['feature'] or ndata['label']")
-    features = features.to(torch.float32).to(device)
-    labels = labels.squeeze().to(torch.int64).to(device)
+    features = features.to(torch.float32).to(effective_device)
+    labels = labels.squeeze().to(torch.int64).to(effective_device)
 
     train_mask = g.ndata.get("train_mask")
     val_mask = g.ndata.get("val_mask")
     test_mask = g.ndata.get("test_mask")
     if train_mask is None or val_mask is None or test_mask is None:
         raise RuntimeError("Graph is missing train/val/test masks.")
-    train_mask = train_mask.to(device)
-    val_mask = val_mask.to(device)
-    test_mask = test_mask.to(device)
+    train_mask = train_mask.to(effective_device)
+    val_mask = val_mask.to(effective_device)
+    test_mask = test_mask.to(effective_device)
 
     train_idx = torch.nonzero(train_mask, as_tuple=True)[0]
     val_idx = torch.nonzero(val_mask, as_tuple=True)[0]
@@ -249,17 +282,20 @@ def train_eval_secgfd(
     if train_idx.numel() == 0 or val_idx.numel() == 0 or test_idx.numel() == 0:
         raise RuntimeError("One of the splits is empty; cannot train/evaluate.")
 
-    in_dim = int(features.shape[1])
-    out_dim = 2
-
-    SECGFD = _import_secgfd_class(repo_root)
-    model = SECGFD(in_dim, int(hid_dim), out_dim, g, d=int(order_d), high_order=int(high_order)).to(device)
+    model = _build_secgfd_model(
+        g,
+        repo_root=repo_root,
+        device=effective_device,
+        hid_dim=hid_dim,
+        order_d=order_d,
+        high_order=high_order,
+    )
 
     opt = torch.optim.Adam(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
 
     # Class imbalance weight on training split.
     pos_w = _class_weight_pos(labels[train_idx])
-    ce_weight = torch.tensor([1.0, float(pos_w)], dtype=torch.float32, device=device)
+    ce_weight = torch.tensor([1.0, float(pos_w)], dtype=torch.float32, device=effective_device)
 
     epochs = 100 if max_epochs is None else int(max_epochs)
     es_patience = 10 if patience is None else int(patience)
@@ -311,21 +347,109 @@ def train_eval_secgfd(
         val_labels = labels[val_idx].detach().cpu().numpy()
         th = best_f1_macro_threshold(val_labels, val_scores)
 
+    return SECGFDModelArtifact(
+        repo_root=repo_root,
+        state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
+        threshold=float(th.threshold),
+        device=str(device),
+        hid_dim=int(hid_dim),
+        order_d=int(order_d),
+        high_order=int(high_order),
+        lemda=float(lemda),
+        lr=float(lr),
+        weight_decay=float(weight_decay),
+    )
+
+
+def eval_secgfd_model(
+    artifact: SECGFDModelArtifact,
+    g,
+    *,
+    threshold: float | None = None,
+) -> dict[str, Any]:
+    import torch
+
+    t0 = time.perf_counter()
+    g, effective_device = _resolve_secgfd_graph_device(g, device=artifact.device)
+
+    features = g.ndata.get("feature")
+    labels = g.ndata.get("label")
+    if features is None or labels is None:
+        raise RuntimeError("Graph missing ndata['feature'] or ndata['label']")
+    features = features.to(torch.float32).to(effective_device)
+    labels = labels.squeeze().to(torch.int64).to(effective_device)
+
+    train_mask = g.ndata.get("train_mask")
+    val_mask = g.ndata.get("val_mask")
+    test_mask = g.ndata.get("test_mask")
+    if train_mask is None or val_mask is None or test_mask is None:
+        raise RuntimeError("Graph is missing train/val/test masks.")
+    test_idx = torch.nonzero(test_mask.to(effective_device), as_tuple=True)[0]
+    if test_idx.numel() == 0:
+        raise RuntimeError("Test split is empty; cannot evaluate.")
+
+    model = _build_secgfd_model(
+        g,
+        repo_root=artifact.repo_root,
+        device=effective_device,
+        hid_dim=artifact.hid_dim,
+        order_d=artifact.order_d,
+        high_order=artifact.high_order,
+    )
+    model.load_state_dict(artifact.state_dict)
+    model.eval()
+    with torch.no_grad():
+        logits, _emb = model(features)
+        probs = torch.softmax(logits, dim=1)[:, 1]
         test_scores = probs[test_idx].detach().cpu().numpy()
         test_labels = labels[test_idx].detach().cpu().numpy()
 
-        roc_auc = roc_auc_binary(test_labels, test_scores)
-        ap = average_precision_binary(test_labels, test_scores)
-        f1m = f1_macro_at_threshold(test_labels, test_scores, th.threshold)
-
-    dt = time.perf_counter() - t0
+    use_threshold = float(artifact.threshold if threshold is None else threshold)
+    roc_auc = roc_auc_binary(test_labels, test_scores)
+    ap = average_precision_binary(test_labels, test_scores)
+    f1m = f1_macro_at_threshold(test_labels, test_scores, use_threshold)
     return {
         "roc_auc": float(roc_auc) if roc_auc is not None else float("nan"),
         "average_precision": float(ap) if ap is not None else float("nan"),
         "f1_macro": float(f1m),
-        "threshold": float(th.threshold),
-        "duration_sec": float(dt),
+        "threshold": use_threshold,
+        "duration_sec": float(time.perf_counter() - t0),
     }
+
+
+def train_eval_secgfd(
+    g,
+    *,
+    repo_root: Path,
+    training_seed: int,
+    device: str,
+    max_epochs: int | None,
+    patience: int | None,
+    hid_dim: int = 64,
+    order_d: int = 2,
+    high_order: int = 2,
+    lemda: float = 0.2,
+    lr: float = 0.01,
+    weight_decay: float = 0.0,
+) -> dict[str, Any]:
+    t0 = time.perf_counter()
+    artifact = train_secgfd_model(
+        g,
+        repo_root=repo_root,
+        training_seed=training_seed,
+        device=device,
+        max_epochs=max_epochs,
+        patience=patience,
+        hid_dim=hid_dim,
+        order_d=order_d,
+        high_order=high_order,
+        lemda=lemda,
+        lr=lr,
+        weight_decay=weight_decay,
+    )
+    out = eval_secgfd_model(artifact, g)
+    out["duration_sec"] = time.perf_counter() - t0
+    return out
 
 
 def run_secgfd_stage(
@@ -407,6 +531,7 @@ def run_secgfd_stage(
                 "pos_rate": v.pos_rate,
                 "base_graph_path": v.base_graph_path,
                 "graph_path": v.graph_path,
+                "train_graph_ref": v.graph_path,
             }
             run_key = make_run_key(
                 dataset_id=v.dataset_id,

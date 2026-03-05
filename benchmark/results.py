@@ -7,8 +7,10 @@ from typing import Any, Mapping
 
 
 PROTOCOL_TRAIN_ON_VARIANT = "train_on_variant"
+PROTOCOL_TRAIN_CLEAN_EVAL_ALL = "train_clean_eval_all"
 RESULTS_COLUMN_DEFAULTS = {
     "protocol": PROTOCOL_TRAIN_ON_VARIANT,
+    "train_graph_ref": "",
 }
 
 RunKey = tuple[str, str, str, float, int, int, str, str]
@@ -45,6 +47,7 @@ RESULTS_COLUMNS = [
     # paths and misc
     "base_graph_path",
     "graph_path",
+    "train_graph_ref",
     "status",
     "error",
 ]

@@ -6,7 +6,14 @@ from pathlib import Path
 
 from .config import ConfigError, get_graph_seeds, init_paths, load_json, validate_config, write_json
 from .paths import base_graph_path, variant_graph_path
-from .results import VARIANTS_COLUMNS, append_csv_row, ensure_csv_header, ensure_results_csv
+from .results import (
+    PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+    PROTOCOL_TRAIN_ON_VARIANT,
+    VARIANTS_COLUMNS,
+    append_csv_row,
+    ensure_csv_header,
+    ensure_results_csv,
+)
 
 
 def _default_out_dir(cfg: dict, config_path: Path) -> Path:
@@ -181,11 +188,12 @@ def main(argv: list[str] | None = None) -> int:
         "--stage",
         type=str,
         default="graphs",
-        choices=["graphs", "baselines", "pmp", "secgfd", "matrix", "plots"],
+        choices=["graphs", "baselines", "pmp", "secgfd", "shift", "matrix", "plots"],
         help="Pipeline stage to run. 'graphs' builds splits and caches graph variants; "
         "'baselines' trains/evaluates MLP + GraphSAGE on cached graphs; "
         "'pmp' trains/evaluates PMP (LA-SAGE-S) from Repos/PMP-master on cached graphs; "
         "'secgfd' trains/evaluates SEC-GFD from Repos/SEC-GFD-main on cached graphs; "
+        "'shift' trains once on the clean graph and evaluates all cached variants; "
         "'matrix' runs baselines + PMP + SEC-GFD; "
         "'plots' generates figures and plot-ready summaries from results.csv.",
     )
@@ -196,6 +204,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--force-reload", action="store_true", help="Force DGL dataset reload/redownload.")
     p.add_argument("--device", type=str, default="cpu", help="Device for model training ('cpu' or 'cuda').")
+    p.add_argument(
+        "--protocol",
+        type=str,
+        default=PROTOCOL_TRAIN_ON_VARIANT,
+        choices=[PROTOCOL_TRAIN_ON_VARIANT, PROTOCOL_TRAIN_CLEAN_EVAL_ALL],
+        help="Evaluation protocol. For --stage matrix, train_clean_eval_all runs the shift protocol.",
+    )
     p.add_argument(
         "--skip-existing",
         dest="skip_existing",
@@ -299,6 +314,23 @@ def main(argv: list[str] | None = None) -> int:
                 max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
                 patience=(None if int(args.patience) <= 0 else int(args.patience)),
             )
+        elif args.stage == "shift":
+            from .shift_stage import run_shift_stage
+
+            run_shift_stage(
+                cfg,
+                out_dir=out_dir,
+                force=bool(args.force),
+                skip_existing=effective_skip_existing,
+                retry_errors=bool(args.retry_errors),
+                device=str(args.device),
+                include_noop=bool(args.include_noop),
+                only_clean=bool(args.only_clean),
+                max_variants=(None if int(args.max_variants) <= 0 else int(args.max_variants)),
+                max_training_seeds=(None if int(args.max_training_seeds) <= 0 else int(args.max_training_seeds)),
+                max_epochs=(None if int(args.max_epochs) <= 0 else int(args.max_epochs)),
+                patience=(None if int(args.patience) <= 0 else int(args.patience)),
+            )
         elif args.stage == "matrix":
             from .matrix_stage import run_matrix_stage
 
@@ -306,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
                 cfg,
                 out_dir=out_dir,
                 force=bool(args.force),
+                protocol=str(args.protocol),
                 skip_existing=effective_skip_existing,
                 retry_errors=bool(args.retry_errors),
                 device=str(args.device),

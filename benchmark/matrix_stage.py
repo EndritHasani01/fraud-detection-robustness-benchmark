@@ -3,12 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .results import PROTOCOL_TRAIN_CLEAN_EVAL_ALL
+
 
 def run_matrix_stage(
     cfg: dict[str, Any],
     *,
     out_dir: Path,
     force: bool,
+    protocol: str,
     skip_existing: bool,
     retry_errors: bool,
     device: str,
@@ -35,6 +38,25 @@ def run_matrix_stage(
         raise FileNotFoundError(
             f"Missing {variants_csv}. Run `py -m benchmark.run --stage graphs ...` first (same --out directory)."
         )
+
+    if str(protocol) == PROTOCOL_TRAIN_CLEAN_EVAL_ALL:
+        from .shift_stage import run_shift_stage
+
+        run_shift_stage(
+            cfg,
+            out_dir=out_dir,
+            force=bool(force),
+            skip_existing=bool(skip_existing),
+            retry_errors=bool(retry_errors),
+            device=str(device),
+            include_noop=bool(include_noop),
+            only_clean=bool(only_clean),
+            max_variants=max_variants,
+            max_training_seeds=max_training_seeds,
+            max_epochs=max_epochs,
+            patience=patience,
+        )
+        return
 
     from .baselines_stage import run_baselines_stage
     from .pmp_stage import run_pmp_stage

@@ -1,0 +1,350 @@
+from __future__ import annotations
+
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+from .baselines_stage import (
+    VariantRow,
+    _load_graph_bin,
+    _read_variants_csv,
+    build_baseline_hparams,
+    eval_baseline_model,
+    train_baseline_model,
+)
+from .config import get_training_seeds
+from .pmp_stage import _load_pmp_yaml_config, eval_pmp_model, train_pmp_model
+from .results import (
+    PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+    append_result_row,
+    ensure_results_csv,
+    load_completed_keys,
+    make_run_key,
+    truncate_error_message,
+)
+from .secgfd_stage import eval_secgfd_model, train_secgfd_model
+from .summarize import summarize_results_by_training_seed
+
+
+def _supported_model_ids(cfg: dict[str, Any]) -> list[str]:
+    mids = []
+    for m in cfg.get("models", []):
+        mid = str(m.get("model_id", ""))
+        if mid in {"mlp", "sage", "pmp", "secgfd"}:
+            mids.append(mid)
+    seen = set()
+    out = []
+    for mid in mids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        out.append(mid)
+    return out
+
+
+def _filtered_variants(
+    variants: list[VariantRow],
+    *,
+    include_noop: bool,
+    only_clean: bool,
+    max_variants: int | None,
+) -> list[VariantRow]:
+    filtered: list[VariantRow] = []
+    for v in variants:
+        if only_clean and v.scenario_id != "clean":
+            continue
+        if (not include_noop) and (not v.scenario_applied) and v.scenario_id != "clean":
+            continue
+        filtered.append(v)
+    if max_variants is not None:
+        filtered = filtered[: int(max_variants)]
+    return filtered
+
+
+def _group_variants_by_split(variants: list[VariantRow]) -> list[tuple[tuple[str, str], list[VariantRow]]]:
+    grouped: dict[tuple[str, str], list[VariantRow]] = defaultdict(list)
+    order: list[tuple[str, str]] = []
+    for v in variants:
+        key = (v.dataset_id, v.split_id)
+        if key not in grouped:
+            order.append(key)
+        grouped[key].append(v)
+    return [(key, grouped[key]) for key in order]
+
+
+def _clean_variant_for_group(variants: list[VariantRow]) -> VariantRow:
+    for v in variants:
+        if v.scenario_id == "clean" and float(v.severity) == 0.0:
+            return v
+    raise RuntimeError("Shift stage requires a clean variant row for each dataset/split group.")
+
+
+def _train_shift_artifact(
+    model_id: str,
+    clean_g,
+    *,
+    dataset_id: str,
+    dataset_cfg_by_id: dict[str, dict[str, Any]],
+    model_cfg_by_id: dict[str, dict[str, Any]],
+    training_seed: int,
+    device: str,
+    max_epochs: int | None,
+    patience: int | None,
+):
+    if model_id in {"mlp", "sage"}:
+        hp = build_baseline_hparams(model_id, max_epochs=max_epochs, patience=patience)
+        return train_baseline_model(
+            model_id,
+            clean_g,
+            training_seed=int(training_seed),
+            device=str(device),
+            hparams=hp,
+        )
+
+    if model_id == "pmp":
+        model_cfg = model_cfg_by_id.get("pmp", {})
+        repo_root = Path(str(model_cfg.get("repo_path", "")))
+        if not repo_root.exists():
+            raise FileNotFoundError(f"Configured PMP repo_path does not exist: {repo_root}")
+        ds_cfg = dataset_cfg_by_id.get(dataset_id, {})
+        dataset_source_name = str(ds_cfg.get("source_name", "yelp")).strip().lower()
+        cfg_pmp = _load_pmp_yaml_config(repo_root, dataset_source_name=dataset_source_name, model_name="LA-SAGE-S")
+        return train_pmp_model(
+            clean_g,
+            repo_root=repo_root,
+            cfg_pmp=cfg_pmp,
+            training_seed=int(training_seed),
+            device=str(device),
+            max_epochs=max_epochs,
+            patience=patience,
+        )
+
+    if model_id == "secgfd":
+        model_cfg = model_cfg_by_id.get("secgfd", {})
+        repo_root = Path(str(model_cfg.get("repo_path", "")))
+        if not repo_root.exists():
+            raise FileNotFoundError(f"Configured SEC-GFD repo_path does not exist: {repo_root}")
+        return train_secgfd_model(
+            clean_g,
+            repo_root=repo_root,
+            training_seed=int(training_seed),
+            device=str(device),
+            max_epochs=max_epochs,
+            patience=patience,
+        )
+
+    raise ValueError(f"Unsupported shift model_id: {model_id}")
+
+
+def _eval_shift_artifact(model_id: str, artifact, g) -> dict[str, Any]:
+    if model_id in {"mlp", "sage"}:
+        return eval_baseline_model(artifact, g)
+    if model_id == "pmp":
+        return eval_pmp_model(artifact, g)
+    if model_id == "secgfd":
+        return eval_secgfd_model(artifact, g)
+    raise ValueError(f"Unsupported shift model_id: {model_id}")
+
+
+def run_shift_stage(
+    cfg: dict[str, Any],
+    *,
+    out_dir: Path,
+    force: bool,
+    skip_existing: bool,
+    retry_errors: bool,
+    device: str,
+    include_noop: bool,
+    only_clean: bool,
+    max_variants: int | None,
+    max_training_seeds: int | None,
+    max_epochs: int | None,
+    patience: int | None,
+) -> None:
+    out_dir = out_dir.resolve()
+    results_csv = out_dir / "results.csv"
+    variants_csv = out_dir / "graph_variants.csv"
+
+    ensure_results_csv(results_csv, overwrite=bool(force))
+    completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
+
+    variants = _read_variants_csv(variants_csv)
+    if not variants:
+        raise RuntimeError(f"No rows found in {variants_csv}")
+
+    filtered = _filtered_variants(
+        variants,
+        include_noop=bool(include_noop),
+        only_clean=bool(only_clean),
+        max_variants=max_variants,
+    )
+    if not filtered:
+        summarize_results_by_training_seed(
+            results_csv,
+            out_csv_path=out_dir / "results_summary_shift.csv",
+            model_ids=set(),
+        )
+        return
+
+    training_seeds = get_training_seeds(cfg)
+    if max_training_seeds is not None:
+        training_seeds = training_seeds[: int(max_training_seeds)]
+
+    dataset_cfg_by_id = {str(d.get("dataset_id", "")): d for d in cfg.get("datasets", [])}
+    model_cfg_by_id = {str(m.get("model_id", "")): m for m in cfg.get("models", [])}
+    model_ids = _supported_model_ids(cfg)
+    if not model_ids:
+        raise RuntimeError("Shift stage requires at least one supported model_id in {'mlp', 'sage', 'pmp', 'secgfd'}.")
+
+    all_groups = dict(_group_variants_by_split(variants))
+    for (dataset_id, _split_id), group_variants in _group_variants_by_split(filtered):
+        clean_variant = _clean_variant_for_group(all_groups[(dataset_id, _split_id)])
+        clean_graph_path = str(clean_variant.graph_path)
+
+        clean_graph = None
+        clean_graph_error: str | None = None
+        clean_graph_error_dt = 0.0
+
+        for model_id in model_ids:
+            for training_seed in training_seeds:
+                pending_variants: list[tuple[VariantRow, tuple[str, str, str, float, int, int, str, str], dict[str, Any]]] = []
+
+                for v in group_variants:
+                    row_common = {
+                        "experiment_name": v.experiment_name,
+                        "dataset_id": v.dataset_id,
+                        "split_id": v.split_id,
+                        "graph_seed": int(v.graph_seed),
+                        "training_seed": int(training_seed),
+                        "scenario_id": v.scenario_id,
+                        "severity": float(v.severity),
+                        "model_id": str(model_id),
+                        "protocol": PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                        "n_nodes": int(v.n_nodes),
+                        "n_edges": int(v.n_edges),
+                        "mean_in_degree": float(v.mean_in_degree),
+                        "median_in_degree": float(v.median_in_degree),
+                        "mean_out_degree": float(v.mean_out_degree),
+                        "median_out_degree": float(v.median_out_degree),
+                        "heterophily_ratio": v.heterophily_ratio,
+                        "pos_rate": v.pos_rate,
+                        "base_graph_path": v.base_graph_path,
+                        "graph_path": v.graph_path,
+                        "train_graph_ref": clean_graph_path,
+                    }
+                    run_key = make_run_key(
+                        dataset_id=v.dataset_id,
+                        split_id=v.split_id,
+                        scenario_id=v.scenario_id,
+                        severity=v.severity,
+                        graph_seed=v.graph_seed,
+                        training_seed=training_seed,
+                        model_id=model_id,
+                        protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                    )
+                    if run_key in completed_keys:
+                        print(
+                            f"[skip] {model_id} / {v.scenario_id} / sev={float(v.severity):g} / "
+                            f"gs={int(v.graph_seed)} / ts={int(training_seed)} already done"
+                        )
+                        continue
+                    pending_variants.append((v, run_key, row_common))
+
+                if not pending_variants:
+                    continue
+
+                if clean_graph is None and clean_graph_error is None:
+                    clean_load_t0 = time.perf_counter()
+                    try:
+                        clean_graph = _load_graph_bin(Path(clean_graph_path))
+                    except Exception as e:
+                        clean_graph_error = truncate_error_message(e)
+                        clean_graph_error_dt = time.perf_counter() - clean_load_t0
+
+                if clean_graph_error is not None:
+                    for _variant, run_key, row_common in pending_variants:
+                        append_result_row(
+                            results_csv,
+                            {
+                                **row_common,
+                                "duration_sec": float(clean_graph_error_dt),
+                                "status": "error",
+                                "error": clean_graph_error,
+                            },
+                        )
+                        completed_keys.add(run_key)
+                    continue
+
+                train_t0 = time.perf_counter()
+                try:
+                    artifact = _train_shift_artifact(
+                        model_id,
+                        clean_graph,
+                        dataset_id=dataset_id,
+                        dataset_cfg_by_id=dataset_cfg_by_id,
+                        model_cfg_by_id=model_cfg_by_id,
+                        training_seed=int(training_seed),
+                        device=str(device),
+                        max_epochs=max_epochs,
+                        patience=patience,
+                    )
+                    train_dt = time.perf_counter() - train_t0
+                except Exception as e:
+                    train_error = truncate_error_message(e)
+                    dt = time.perf_counter() - train_t0
+                    for _variant, run_key, row_common in pending_variants:
+                        append_result_row(
+                            results_csv,
+                            {
+                                **row_common,
+                                "duration_sec": float(dt),
+                                "status": "error",
+                                "error": train_error,
+                            },
+                        )
+                        completed_keys.add(run_key)
+                    continue
+
+                for variant, run_key, row_common in pending_variants:
+                    eval_t0 = time.perf_counter()
+                    try:
+                        eval_graph = _load_graph_bin(Path(variant.graph_path))
+                        out = _eval_shift_artifact(model_id, artifact, eval_graph)
+                        duration = float(out["duration_sec"])
+                        if variant.scenario_id == "clean" and float(variant.severity) == 0.0:
+                            duration += float(train_dt)
+                        append_result_row(
+                            results_csv,
+                            {
+                                **row_common,
+                                "roc_auc": out["roc_auc"],
+                                "average_precision": out["average_precision"],
+                                "f1_macro": out["f1_macro"],
+                                "threshold": out["threshold"],
+                                "duration_sec": duration,
+                                "status": "ok",
+                                "error": "",
+                            },
+                        )
+                    except Exception as e:
+                        dt = time.perf_counter() - eval_t0
+                        if variant.scenario_id == "clean" and float(variant.severity) == 0.0:
+                            dt += float(train_dt)
+                        append_result_row(
+                            results_csv,
+                            {
+                                **row_common,
+                                "duration_sec": float(dt),
+                                "status": "error",
+                                "error": truncate_error_message(e),
+                            },
+                        )
+                    finally:
+                        completed_keys.add(run_key)
+
+    summarize_results_by_training_seed(
+        results_csv,
+        out_csv_path=out_dir / "results_summary_shift.csv",
+        model_ids=set(model_ids),
+    )

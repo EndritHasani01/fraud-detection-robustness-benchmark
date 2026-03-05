@@ -21,7 +21,7 @@ class ResultsCsvTests(unittest.TestCase):
     def test_ensure_csv_header_migrates_v1_results_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "results.csv"
-            old_columns = [col for col in RESULTS_COLUMNS if col != "protocol"]
+            old_columns = [col for col in RESULTS_COLUMNS if col not in {"protocol", "train_graph_ref"}]
 
             with path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=old_columns)
@@ -65,13 +65,14 @@ class ResultsCsvTests(unittest.TestCase):
             self.assertEqual(reader.fieldnames, RESULTS_COLUMNS)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["protocol"], PROTOCOL_TRAIN_ON_VARIANT)
+            self.assertEqual(rows[0]["train_graph_ref"], "")
             self.assertEqual(rows[0]["model_id"], "mlp")
             self.assertEqual(rows[0]["status"], "ok")
 
     def test_load_completed_keys_respects_retry_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "results.csv"
-            old_columns = [col for col in RESULTS_COLUMNS if col != "protocol"]
+            old_columns = [col for col in RESULTS_COLUMNS if col not in {"protocol", "train_graph_ref"}]
 
             with path.open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=old_columns)
@@ -297,7 +298,7 @@ class ResultsCsvTests(unittest.TestCase):
 
     @staticmethod
     def _write_results_csv(path: Path, rows: list[dict[str, object]]) -> None:
-        old_columns = [col for col in RESULTS_COLUMNS if col != "protocol"]
+        old_columns = [col for col in RESULTS_COLUMNS if col not in {"protocol", "train_graph_ref"}]
         with path.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=old_columns)
             writer.writeheader()

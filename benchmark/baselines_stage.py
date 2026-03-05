@@ -49,6 +49,17 @@ class VariantRow:
     pos_rate: float | None
 
 
+@dataclass(frozen=True)
+class BaselineModelArtifact:
+    model_id: str
+    hparams: BaselineHParams
+    state_dict: dict[str, Any]
+    threshold: float
+    device: str
+    feature_key: str = "feature"
+    label_key: str = "label"
+
+
 def _parse_bool(x: Any) -> bool:
     if isinstance(x, bool):
         return bool(x)
@@ -150,33 +161,51 @@ def _forward_logits(model_id: str, model, g, x):
     raise ValueError(f"Unsupported baseline model_id: {model_id}")
 
 
-def train_eval_baseline(
-    model_id: str,
-    g,
-    *,
-    training_seed: int,
-    device: str,
-    hparams: BaselineHParams,
-    feature_key: str = "feature",
-    label_key: str = "label",
-) -> dict[str, Any]:
-    import torch
-    import torch.nn.functional as F
+def build_baseline_hparams(model_id: str, *, max_epochs: int | None, patience: int | None) -> BaselineHParams:
+    if model_id == "mlp":
+        hp = BaselineHParams(lr=1e-3, max_epochs=100, patience=10, hidden_dim=128, dropout=0.5)
+    else:
+        hp = BaselineHParams(lr=1e-2, max_epochs=100, patience=10, hidden_dim=64, dropout=0.5)
 
-    t0 = time.perf_counter()
-    _set_seeds(int(training_seed))
+    if max_epochs is not None:
+        hp = BaselineHParams(
+            hidden_dim=hp.hidden_dim,
+            dropout=hp.dropout,
+            lr=hp.lr,
+            weight_decay=hp.weight_decay,
+            max_epochs=int(max_epochs),
+            patience=hp.patience,
+        )
+    if patience is not None:
+        hp = BaselineHParams(
+            hidden_dim=hp.hidden_dim,
+            dropout=hp.dropout,
+            lr=hp.lr,
+            weight_decay=hp.weight_decay,
+            max_epochs=hp.max_epochs,
+            patience=int(patience),
+        )
+    return hp
+
+
+def _resolve_baseline_device(model_id: str, g, device: str):
+    import torch
 
     if device not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
     if device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
 
-    # If the caller asked for CUDA but the DGL wheel/graph is CPU-only, fall back to CPU.
     if model_id == "sage" and device == "cuda":
         try:
             g = g.to("cuda")
         except Exception:
             device = "cpu"
+    return g, str(device)
+
+
+def _baseline_split_tensors(g, *, device: str, feature_key: str, label_key: str):
+    import torch
 
     x = g.ndata.get(feature_key)
     y = g.ndata.get(label_key)
@@ -198,19 +227,41 @@ def train_eval_baseline(
         raise RuntimeError("One of the splits is empty; cannot train/evaluate.")
 
     in_dim = int(x.shape[1])
-    model = build_baseline(model_id, in_dim=in_dim, hparams=hparams)
-    model = model.to(device)
-
-    # Move data to device (graph structure stays on CPU for CPU DGL wheels).
     x_dev = x.to(device)
     y_dev = y.to(device)
     train_idx = train_idx.to(device)
     val_idx = val_idx.to(device)
     test_idx = test_idx.to(device)
+    return in_dim, x_dev, y_dev, train_idx, val_idx, test_idx
+
+
+def train_baseline_model(
+    model_id: str,
+    g,
+    *,
+    training_seed: int,
+    device: str,
+    hparams: BaselineHParams,
+    feature_key: str = "feature",
+    label_key: str = "label",
+) -> BaselineModelArtifact:
+    import torch
+    import torch.nn.functional as F
+
+    _set_seeds(int(training_seed))
+    g, effective_device = _resolve_baseline_device(model_id, g, device)
+    in_dim, x_dev, y_dev, train_idx, val_idx, _test_idx = _baseline_split_tensors(
+        g,
+        device=effective_device,
+        feature_key=feature_key,
+        label_key=label_key,
+    )
+    model = build_baseline(model_id, in_dim=in_dim, hparams=hparams)
+    model = model.to(effective_device)
 
     class_w = _class_weights_from_train_labels(y_dev[train_idx])
     if class_w is not None:
-        class_w = class_w.to(device)
+        class_w = class_w.to(effective_device)
     loss_fn = torch.nn.CrossEntropyLoss(weight=class_w)
 
     opt = torch.optim.Adam(
@@ -267,21 +318,83 @@ def train_eval_baseline(
         val_labels = y_dev[val_idx].detach().cpu().numpy()
         th = best_f1_macro_threshold(val_labels, val_scores)
 
+    return BaselineModelArtifact(
+        model_id=str(model_id),
+        hparams=hparams,
+        state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
+        threshold=float(th.threshold),
+        device=str(device),
+        feature_key=feature_key,
+        label_key=label_key,
+    )
+
+
+def eval_baseline_model(
+    artifact: BaselineModelArtifact,
+    g,
+    *,
+    threshold: float | None = None,
+) -> dict[str, Any]:
+    import torch
+    import torch.nn.functional as F
+
+    t0 = time.perf_counter()
+    g, effective_device = _resolve_baseline_device(artifact.model_id, g, artifact.device)
+    in_dim, x_dev, y_dev, _train_idx, _val_idx, test_idx = _baseline_split_tensors(
+        g,
+        device=effective_device,
+        feature_key=artifact.feature_key,
+        label_key=artifact.label_key,
+    )
+    model = build_baseline(artifact.model_id, in_dim=in_dim, hparams=artifact.hparams)
+    model.load_state_dict(artifact.state_dict)
+    model = model.to(effective_device)
+    model.eval()
+
+    with torch.no_grad():
+        logits = _forward_logits(artifact.model_id, model, g, x_dev)
+        probs = F.softmax(logits, dim=1)[:, 1]
         test_scores = probs[test_idx].detach().cpu().numpy()
         test_labels = y_dev[test_idx].detach().cpu().numpy()
 
-        roc_auc = roc_auc_binary(test_labels, test_scores)
-        ap = average_precision_binary(test_labels, test_scores)
-        f1m = f1_macro_at_threshold(test_labels, test_scores, th.threshold)
+    use_threshold = float(artifact.threshold if threshold is None else threshold)
+    roc_auc = roc_auc_binary(test_labels, test_scores)
+    ap = average_precision_binary(test_labels, test_scores)
+    f1m = f1_macro_at_threshold(test_labels, test_scores, use_threshold)
 
     dt = time.perf_counter() - t0
     return {
         "roc_auc": float(roc_auc) if roc_auc is not None else float("nan"),
         "average_precision": float(ap) if ap is not None else float("nan"),
         "f1_macro": float(f1m),
-        "threshold": float(th.threshold),
+        "threshold": use_threshold,
         "duration_sec": float(dt),
     }
+
+
+def train_eval_baseline(
+    model_id: str,
+    g,
+    *,
+    training_seed: int,
+    device: str,
+    hparams: BaselineHParams,
+    feature_key: str = "feature",
+    label_key: str = "label",
+) -> dict[str, Any]:
+    t0 = time.perf_counter()
+    artifact = train_baseline_model(
+        model_id,
+        g,
+        training_seed=training_seed,
+        device=device,
+        hparams=hparams,
+        feature_key=feature_key,
+        label_key=label_key,
+    )
+    out = eval_baseline_model(artifact, g)
+    out["duration_sec"] = time.perf_counter() - t0
+    return out
 
 
 def run_baselines_stage(
@@ -357,6 +470,7 @@ def run_baselines_stage(
                     "pos_rate": v.pos_rate,
                     "base_graph_path": v.base_graph_path,
                     "graph_path": v.graph_path,
+                    "train_graph_ref": v.graph_path,
                 }
                 run_key = make_run_key(
                     dataset_id=v.dataset_id,
@@ -401,29 +515,7 @@ def run_baselines_stage(
         for model_id, training_seed, run_key, row_common in pending_runs:
             run_t0 = time.perf_counter()
             try:
-                if model_id == "mlp":
-                    hp = BaselineHParams(lr=1e-3, max_epochs=100, patience=10, hidden_dim=128, dropout=0.5)
-                else:
-                    hp = BaselineHParams(lr=1e-2, max_epochs=100, patience=10, hidden_dim=64, dropout=0.5)
-
-                if max_epochs is not None:
-                    hp = BaselineHParams(
-                        hidden_dim=hp.hidden_dim,
-                        dropout=hp.dropout,
-                        lr=hp.lr,
-                        weight_decay=hp.weight_decay,
-                        max_epochs=int(max_epochs),
-                        patience=hp.patience,
-                    )
-                if patience is not None:
-                    hp = BaselineHParams(
-                        hidden_dim=hp.hidden_dim,
-                        dropout=hp.dropout,
-                        lr=hp.lr,
-                        weight_decay=hp.weight_decay,
-                        max_epochs=hp.max_epochs,
-                        patience=int(patience),
-                    )
+                hp = build_baseline_hparams(str(model_id), max_epochs=max_epochs, patience=patience)
 
                 out = train_eval_baseline(
                     str(model_id),

@@ -117,6 +117,25 @@ def _model_ids_from_config(cfg: dict[str, Any]) -> list[str]:
     return out
 
 
+def _protocols_present_in_results(results_csv: Path, *, model_ids: list[str]) -> set[str]:
+    if not results_csv.exists():
+        return set()
+
+    allowed_model_ids = set(model_ids)
+    protocols: set[str] = set()
+    with results_csv.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for r in reader:
+            mid = str(r.get("model_id", ""))
+            if allowed_model_ids and mid not in allowed_model_ids:
+                continue
+            status = str(r.get("status", "")).strip().lower()
+            if status not in {"ok", "error"}:
+                continue
+            protocols.add(normalize_protocol(r.get("protocol", "")))
+    return protocols
+
+
 def _completeness_report(
     cfg: dict[str, Any],
     *,
@@ -154,7 +173,6 @@ def _completeness_report(
                     scenario_id,
                     float(severity),
                     _safe_int(r.get("graph_seed", 0)),
-                    PROTOCOL_TRAIN_ON_VARIANT,
                 )
             )
 
@@ -166,12 +184,16 @@ def _completeness_report(
         training_seeds = training_seeds[: int(max_training_seeds)]
 
     model_ids = [m for m in _model_ids_from_config(cfg) if m in {"mlp", "sage", "pmp", "secgfd"}]
+    protocols = _protocols_present_in_results(results_csv, model_ids=model_ids)
+    if not protocols:
+        protocols = {PROTOCOL_TRAIN_ON_VARIANT}
 
     expected_keys: set[tuple] = set()
-    for ds, split, scenario_id, severity, graph_seed, protocol in expected_variant_rows:
+    for ds, split, scenario_id, severity, graph_seed in expected_variant_rows:
         for tr in training_seeds:
             for mid in model_ids:
-                expected_keys.add((ds, split, scenario_id, float(severity), int(graph_seed), int(tr), mid, protocol))
+                for protocol in protocols:
+                    expected_keys.add((ds, split, scenario_id, float(severity), int(graph_seed), int(tr), mid, protocol))
 
     found_ok: set[tuple] = set()
     found_err: set[tuple] = set()
