@@ -1,0 +1,152 @@
+{
+  "experiment_name": "gfd_robustness_benchmark_v2_full",
+  "created_date": "2026-03-05",
+  "project_topic": "Fraud detection using graphs (node-level anomaly/fraud classification)",
+  "datasets": [
+    {
+      "dataset_id": "yelpchi",
+      "source": "dgl.data.FraudDataset",
+      "source_name": "yelp",
+      "notes": "YelpChi as exposed by DGL FraudDataset."
+    }
+  ],
+  "data_splits": [
+    {
+      "split_id": "s0",
+      "train_size": 0.4,
+      "val_size": 0.2,
+      "split_seed": 717,
+      "policy": "Single fixed split reused across all scenarios and severities."
+    }
+  ],
+  "graph_representation": {
+    "canonical_view": "homogeneous",
+    "from_source_view": "heterograph",
+    "conversion": "dgl.to_homogeneous",
+    "rationale": "Keeps one canonical graph view for all models and perturbations; relation types are merged."
+  },
+  "models": [
+    {
+      "model_id": "mlp",
+      "category": "baseline",
+      "type": "mlp",
+      "input": "node_features_only",
+      "notes": "Required sanity baseline (no message passing)."
+    },
+    {
+      "model_id": "sage",
+      "category": "baseline",
+      "type": "graphsage",
+      "input": "graph_plus_node_features",
+      "notes": "One standard message-passing baseline."
+    },
+    {
+      "model_id": "pmp",
+      "category": "specialized",
+      "type": "pmp",
+      "repo_path": "Repos/PMP-master",
+      "hparams": {
+        "full_neighbors": false,
+        "sampled_neighbors": [
+          10
+        ],
+        "batch_size": 512,
+        "num_workers": 0,
+        "epochs": 100,
+        "patience": 10
+      },
+      "notes": "PMP with benchmark-side sampled-neighbor overrides for feasibility."
+    },
+    {
+      "model_id": "secgfd",
+      "category": "specialized",
+      "type": "sec_gfd",
+      "repo_path": "Repos/SEC-GFD-main",
+      "hparams": {
+        "hid_dim": 32,
+        "order_d": 2,
+        "high_order": 1,
+        "lemda": 0.2,
+        "lr": 0.01,
+        "weight_decay": 0.0
+      },
+      "notes": "SEC-GFD with reduced-cost v2 hyperparameters."
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "heterophily_rewire_oracle",
+      "family": "heterophily",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "method": "rewire_edge_dst_to_opposite_label",
+      "oracle_labels": true,
+      "notes": "Full heterophily severity curve."
+    },
+    {
+      "scenario_id": "camouflage_feature_oracle",
+      "family": "camouflage",
+      "severity_param": "p_cam_feat",
+      "severity_values": [
+        0.0,
+        0.1,
+        0.2,
+        0.3
+      ],
+      "method": "replace_fraud_features_with_normal_features",
+      "oracle_labels": true,
+      "gamma": 1.0,
+      "notes": "Full camouflage severity curve."
+    },
+    {
+      "scenario_id": "noise_edges",
+      "family": "noise",
+      "severity_param": "edge_noise_rate",
+      "severity_values": [
+        0.0,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "method": "add_random_edges",
+      "undirected": false,
+      "notes": "Full noise severity curve."
+    }
+  ],
+  "seeds": {
+    "graph_seeds": [
+      0,
+      1
+    ],
+    "training_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "policy": "Graph seeds control perturbation variance; training seeds control model variance."
+  },
+  "evaluation": {
+    "metrics": [
+      "roc_auc",
+      "average_precision",
+      "f1_macro"
+    ],
+    "threshold_selection": "best_f1_on_validation",
+    "no_test_leakage": true,
+    "reporting": [
+      "mean",
+      "std"
+    ]
+  },
+  "disclosures": [
+    "Oracle perturbations: some scenarios use true labels to construct stress tests. This must be disclosed in the report.",
+    "Canonical graph view is homogeneous (relations merged) for cross-model comparability."
+  ]
+}
