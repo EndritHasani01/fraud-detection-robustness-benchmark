@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .config import get_training_seeds
+from .config import get_training_seeds, scenario_oracle_labels
 from .results import PROTOCOL_TRAIN_ON_VARIANT, normalize_protocol
 from .variants import filter_variants, read_variants_csv
 
@@ -131,7 +131,7 @@ def _scenario_meta_by_id(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out = {"clean": {"oracle_labels": False, "display_name": "clean"}}
     for scenario_cfg in cfg.get("scenarios", []):
         scenario_id = str(scenario_cfg.get("scenario_id", ""))
-        oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
+        oracle_labels = scenario_oracle_labels(scenario_cfg)
         out[scenario_id] = {
             "oracle_labels": oracle_labels,
             "display_name": scenario_id + (" (oracle)" if oracle_labels else ""),

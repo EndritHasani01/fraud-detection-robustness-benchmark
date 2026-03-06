@@ -4,17 +4,33 @@ import contextlib
 import io
 import unittest
 
-from benchmark.config import ConfigError, get_graph_seeds, get_training_seeds, validate_config
+from benchmark.config import (
+    ConfigError,
+    get_graph_seeds,
+    get_training_seeds,
+    scenario_graph_view_mode,
+    scenario_oracle_labels,
+    should_export_variant_audit,
+    validate_config,
+)
 
 
 def _base_cfg() -> dict:
     return {
         "experiment_name": "exp",
-        "datasets": [{"dataset_id": "yelpchi"}],
-        "data_splits": [{"split_id": "s0"}],
+        "datasets": [{"dataset_id": "yelpchi", "source_name": "yelp"}],
+        "data_splits": [{"split_id": "s0", "split_seed": 0, "train_size": 0.4, "val_size": 0.2}],
         "graph_representation": {"canonical_view": "homogeneous"},
         "models": [{"model_id": "mlp"}],
-        "scenarios": [{"scenario_id": "noise_edges", "severity_values": [0.0, 0.1]}],
+        "scenarios": [
+            {
+                "scenario_id": "noise_edges",
+                "family": "noise",
+                "severity_param": "edge_noise_rate",
+                "severity_values": [0.0, 0.1],
+                "method": "add_random_edges",
+            }
+        ],
         "seeds": {"training_seeds": [0, 1, 2]},
         "evaluation": {"metrics": ["roc_auc"]},
     }
@@ -85,6 +101,113 @@ class ConfigSeedTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ConfigError, r"secgfd\.hparams\.high_order must be an integer"):
             validate_config(cfg)
+
+
+class ConfigV3SchemaTests(unittest.TestCase):
+    def test_validate_config_accepts_v3_scenario_metadata(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"] = [
+            {
+                "scenario_id": "heterophily_rewire_nonoracle",
+                "family": "heterophily",
+                "scenario_group": "heterophily",
+                "severity_param": "p_rewire",
+                "severity_values": [0.0, 0.15, 0.3],
+                "method": "rewire_edge_dst_to_feature_pseudo_opposite_label",
+                "oracle_mode": "non_oracle",
+                "graph_view_mode": "heterograph_aware_generation",
+                "relation_filter": ["net_rsr", "net_rtr", "net_rur"],
+                "allow_self_loops": False,
+                "reject_existing": True,
+                "reject_duplicates": True,
+                "max_attempt_multiplier": 20,
+            },
+            {
+                "scenario_id": "camouflage_relation_oracle",
+                "family": "camouflage_relation",
+                "scenario_group": "camouflage",
+                "severity_param": "p_cam_rel",
+                "severity_values": [0.0, 0.3],
+                "method": "add_relation_camouflage_edges",
+                "oracle_mode": "oracle",
+                "oracle_labels": True,
+                "graph_view_mode": "heterograph",
+                "relation_filter": ["net_rsr"],
+                "camouflage_edges_per_node": 2,
+                "remove_suspicious_ratio": 0.5,
+            },
+        ]
+        cfg["evaluation"]["export_variant_audit"] = True
+        cfg["evaluation"]["audit_metrics"] = [
+            "n_rewired_edges_actual",
+            "heterophily_ratio_after",
+            "fraud_to_normal_neighbor_ratio_after",
+        ]
+
+        validate_config(cfg)
+
+        self.assertFalse(scenario_oracle_labels(cfg["scenarios"][0]))
+        self.assertTrue(scenario_oracle_labels(cfg["scenarios"][1]))
+        self.assertEqual(scenario_graph_view_mode(cfg["scenarios"][1]), "heterograph_aware_generation")
+        self.assertTrue(should_export_variant_audit(cfg))
+
+    def test_validate_config_rejects_invalid_oracle_mode(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["oracle_mode"] = "mystery"
+
+        with self.assertRaisesRegex(ConfigError, r"cfg\['scenarios'\]\[0\]\.oracle_mode must be 'oracle' or 'non_oracle'"):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_conflicting_oracle_fields(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["oracle_mode"] = "oracle"
+        cfg["scenarios"][0]["oracle_labels"] = False
+
+        with self.assertRaisesRegex(
+            ConfigError,
+            r"cfg\['scenarios'\]\[0\]\.oracle_mode conflicts with cfg\['scenarios'\]\[0\]\.oracle_labels",
+        ):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_invalid_graph_view_mode(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["graph_view_mode"] = "invalid"
+
+        with self.assertRaisesRegex(
+            ConfigError,
+            r"scenario\.graph_view_mode must be 'canonical' or 'heterograph_aware_generation'",
+        ):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_invalid_relation_filter(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["relation_filter"] = ["net_rsr", ""]
+
+        with self.assertRaisesRegex(ConfigError, r"cfg\['scenarios'\]\[0\]\.relation_filter\[1\] must be a non-empty string"):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_invalid_relation_camouflage_parameters(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["camouflage_edges_per_node"] = 0
+
+        with self.assertRaisesRegex(
+            ConfigError,
+            r"cfg\['scenarios'\]\[0\]\.camouflage_edges_per_node must be an integer >= 1",
+        ):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_invalid_audit_export_controls(self) -> None:
+        cfg = _base_cfg()
+        cfg["evaluation"]["export_variant_audit"] = "yes"
+
+        with self.assertRaisesRegex(ConfigError, r"evaluation\.export_variant_audit must be a boolean"):
+            validate_config(cfg)
+
+    def test_should_export_variant_audit_defaults_to_true(self) -> None:
+        cfg = _base_cfg()
+
+        self.assertTrue(should_export_variant_audit(cfg))
+        self.assertTrue(should_export_variant_audit({"experiment_name": "exp"}))
 
 
 if __name__ == "__main__":

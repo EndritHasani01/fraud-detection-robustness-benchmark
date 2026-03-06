@@ -241,6 +241,47 @@ class RunModelsCliTests(unittest.TestCase):
             stressed_row = next(row for row in audit_rows if row["scenario_id"] == "camouflage_relation_oracle")
             self.assertEqual(stressed_row["graph_view_mode"], "heterograph_aware_generation")
 
+    def test_graphs_only_can_disable_variant_audit_export(self) -> None:
+        cfg = {
+            "experiment_name": "exp",
+            "graph_representation": {"canonical_view": "homogeneous"},
+            "evaluation": {"metrics": ["roc_auc"], "export_variant_audit": False},
+            "seeds": {"training_seeds": [7], "graph_seeds": [11]},
+            "datasets": [{"dataset_id": "yelpchi", "source_name": "yelp"}],
+            "data_splits": [
+                {
+                    "split_id": "split_0",
+                    "split_seed": 13,
+                    "train_size": 0.6,
+                    "val_size": 0.2,
+                }
+            ],
+            "scenarios": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            with mock.patch("benchmark.run._make_source_graph", return_value=object()):
+                with mock.patch("benchmark.run._to_canonical_graph", return_value=object()):
+                    with mock.patch("benchmark.cache.save_graph"):
+                        with mock.patch(
+                            "benchmark.stats.compute_graph_stats",
+                            return_value={
+                                "n_nodes": 10,
+                                "n_edges": 12,
+                                "mean_in_degree": 1.2,
+                                "median_in_degree": 1.0,
+                                "mean_out_degree": 1.2,
+                                "median_out_degree": 1.0,
+                                "heterophily_ratio": 0.3,
+                                "pos_rate": 0.2,
+                            },
+                        ):
+                            _graphs_only(cfg, out_dir=out_dir, force=False, force_reload=False)
+
+            self.assertTrue((out_dir / "graph_variants.csv").exists())
+            self.assertFalse((out_dir / "variant_audit.csv").exists())
+
 
 class StageModelFilterTests(unittest.TestCase):
     def test_pmp_stage_warns_and_exits_when_models_filter_excludes_pmp(self) -> None:

@@ -4,7 +4,17 @@ import argparse
 import time
 from pathlib import Path
 
-from .config import ConfigError, get_graph_seeds, init_paths, load_json, validate_config, write_json
+from .config import (
+    ConfigError,
+    get_graph_seeds,
+    init_paths,
+    load_json,
+    scenario_graph_view_mode,
+    scenario_oracle_labels,
+    should_export_variant_audit,
+    validate_config,
+    write_json,
+)
 from .paths import base_graph_path, variant_graph_path
 from .preflight import parse_requested_model_ids, print_graphs_preflight
 from .results import (
@@ -62,15 +72,6 @@ def _make_base_graph(cfg: dict, dataset_cfg: dict, split_cfg: dict, *, out_dir: 
     source_graph = _make_source_graph(cfg, dataset_cfg, split_cfg, out_dir=out_dir, force_reload=force_reload)
     canonical = cfg["graph_representation"]["canonical_view"]
     return _to_canonical_graph(source_graph, canonical_view=canonical)
-
-
-def _scenario_graph_view_mode(scenario_cfg: dict[str, object]) -> str:
-    mode = str(scenario_cfg.get("graph_view_mode", "canonical") or "canonical").strip().lower()
-    if mode in {"heterograph_aware_generation", "heterograph-aware-generation", "heterograph"}:
-        return "heterograph_aware_generation"
-    return "canonical"
-
-
 def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -> None:
     from .cache import save_graph, save_graph_ref
     from .scenarios import ScenarioSpec, apply_scenario
@@ -86,6 +87,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
     ensure_results_csv(paths.results_csv_path, overwrite=force)
     variants_tmp_path = paths.out_dir / f"{paths.variants_csv_path.name}.tmp"
     variant_audit_tmp_path = paths.out_dir / f"{paths.variant_audit_csv_path.name}.tmp"
+    export_variant_audit = should_export_variant_audit(cfg)
     if variants_tmp_path.exists():
         variants_tmp_path.unlink()
     if variant_audit_tmp_path.exists():
@@ -95,7 +97,8 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
     if paths.variant_audit_csv_path.exists():
         paths.variant_audit_csv_path.unlink()
     ensure_csv_header(variants_tmp_path, VARIANTS_COLUMNS, overwrite=True)
-    ensure_variant_audit_csv(variant_audit_tmp_path, overwrite=True)
+    if export_variant_audit:
+        ensure_variant_audit_csv(variant_audit_tmp_path, overwrite=True)
 
     experiment_name = cfg["experiment_name"]
     graph_seeds = get_graph_seeds(cfg)
@@ -146,35 +149,36 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                         **base_stats,
                     },
                 )
-                append_variant_audit_row(
-                    variant_audit_tmp_path,
-                    build_variant_audit_row(
-                        experiment_name=experiment_name,
-                        dataset_id=dataset_id,
-                        split_id=split_id,
-                        scenario_id="clean",
-                        severity=0.0,
-                        graph_seed=int(split_seed),
-                        oracle_labels=False,
-                        scenario_applied=True,
-                        scenario_family="clean",
-                        scenario_method="clean",
-                        severity_param="severity",
-                        graph_view_mode="canonical",
-                        base_graph_path=str(base_p.graph_bin_path),
-                        graph_path=str(base_p.graph_bin_path),
-                        base_stats=base_stats,
-                        variant_stats=base_stats,
-                        scenario_info={},
-                    ),
-                )
+                if export_variant_audit:
+                    append_variant_audit_row(
+                        variant_audit_tmp_path,
+                        build_variant_audit_row(
+                            experiment_name=experiment_name,
+                            dataset_id=dataset_id,
+                            split_id=split_id,
+                            scenario_id="clean",
+                            severity=0.0,
+                            graph_seed=int(split_seed),
+                            oracle_labels=False,
+                            scenario_applied=True,
+                            scenario_family="clean",
+                            scenario_method="clean",
+                            severity_param="severity",
+                            graph_view_mode="canonical",
+                            base_graph_path=str(base_p.graph_bin_path),
+                            graph_path=str(base_p.graph_bin_path),
+                            base_stats=base_stats,
+                            variant_stats=base_stats,
+                            scenario_info={},
+                        ),
+                    )
 
                 for scenario_cfg in cfg["scenarios"]:
                     scenario_id = scenario_cfg["scenario_id"]
-                    oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
+                    oracle_labels = scenario_oracle_labels(scenario_cfg)
                     severity_values = scenario_cfg["severity_values"]
                     scenario_params = {k: v for k, v in scenario_cfg.items() if k not in {"severity_values"}}
-                    graph_view_mode = _scenario_graph_view_mode(scenario_cfg)
+                    graph_view_mode = scenario_graph_view_mode(scenario_cfg)
 
                     for severity in severity_values:
                         for graph_seed in graph_seeds:
@@ -246,31 +250,33 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                                     **var_stats,
                                 },
                             )
-                            append_variant_audit_row(
-                                variant_audit_tmp_path,
-                                build_variant_audit_row(
-                                    experiment_name=experiment_name,
-                                    dataset_id=dataset_id,
-                                    split_id=split_id,
-                                    scenario_id=scenario_id,
-                                    severity=float(severity),
-                                    graph_seed=int(graph_seed),
-                                    oracle_labels=oracle_labels,
-                                    scenario_applied=bool(applied),
-                                    scenario_family=str(scenario_cfg.get("family", "")),
-                                    scenario_method=str(spec.method),
-                                    severity_param=str(spec.severity_param),
-                                    graph_view_mode=graph_view_mode,
-                                    base_graph_path=str(base_p.graph_bin_path),
-                                    graph_path=str(graph_path_for_row),
-                                    base_stats=base_stats,
-                                    variant_stats=var_stats,
-                                    scenario_info=info,
-                                ),
-                            )
+                            if export_variant_audit:
+                                append_variant_audit_row(
+                                    variant_audit_tmp_path,
+                                    build_variant_audit_row(
+                                        experiment_name=experiment_name,
+                                        dataset_id=dataset_id,
+                                        split_id=split_id,
+                                        scenario_id=scenario_id,
+                                        severity=float(severity),
+                                        graph_seed=int(graph_seed),
+                                        oracle_labels=oracle_labels,
+                                        scenario_applied=bool(applied),
+                                        scenario_family=str(scenario_cfg.get("family", "")),
+                                        scenario_method=str(spec.method),
+                                        severity_param=str(spec.severity_param),
+                                        graph_view_mode=graph_view_mode,
+                                        base_graph_path=str(base_p.graph_bin_path),
+                                        graph_path=str(graph_path_for_row),
+                                        base_stats=base_stats,
+                                        variant_stats=var_stats,
+                                        scenario_info=info,
+                                    ),
+                                )
 
         variants_tmp_path.replace(paths.variants_csv_path)
-        variant_audit_tmp_path.replace(paths.variant_audit_csv_path)
+        if export_variant_audit:
+            variant_audit_tmp_path.replace(paths.variant_audit_csv_path)
     finally:
         if variants_tmp_path.exists():
             variants_tmp_path.unlink()

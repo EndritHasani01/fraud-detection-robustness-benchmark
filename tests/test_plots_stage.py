@@ -259,7 +259,7 @@ class PlotsStageTests(unittest.TestCase):
                     {
                         "scenario_id": "heterophily_rewire_oracle",
                         "severity_values": [0.0, 0.3],
-                        "oracle_labels": True,
+                        "oracle_mode": "oracle",
                     }
                 ],
             }
@@ -411,11 +411,11 @@ class PlotsStageTests(unittest.TestCase):
                 "models": [{"model_id": "mlp"}],
                 "seeds": {"training_seeds": [42]},
                 "scenarios": [
-                    {"scenario_id": "noise_edges", "severity_values": [0.0, 0.2], "oracle_labels": False},
+                    {"scenario_id": "noise_edges", "severity_values": [0.0, 0.2], "oracle_mode": "non_oracle"},
                     {
                         "scenario_id": "camouflage_feature_oracle",
                         "severity_values": [0.0, 0.3],
-                        "oracle_labels": True,
+                        "oracle_mode": "oracle",
                     },
                 ],
             }
