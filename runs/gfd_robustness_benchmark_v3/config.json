@@ -1,0 +1,239 @@
+{
+  "created_date": "2026-03-06",
+  "data_splits": [
+    {
+      "policy": "Single fixed split reused across all scenarios and severities.",
+      "split_id": "s0",
+      "split_seed": 717,
+      "train_size": 0.4,
+      "val_size": 0.2
+    }
+  ],
+  "datasets": [
+    {
+      "dataset_id": "yelpchi",
+      "notes": "YelpChi as exposed by DGL FraudDataset.",
+      "source": "dgl.data.FraudDataset",
+      "source_name": "yelp"
+    }
+  ],
+  "disclosures": [
+    "Oracle scenarios remain controlled stress tests and must be disclosed as such in reporting.",
+    "Relation-aware scenarios are generated on the source heterograph before converting back to the shared homogeneous evaluation view.",
+    "This benchmark is a static robustness evaluation, not a realistic adversarial fraud simulation."
+  ],
+  "evaluation": {
+    "audit_metrics": [
+      "n_rewired_edges_actual",
+      "heterophily_ratio_before",
+      "heterophily_ratio_after",
+      "mean_cosine_to_sampled_normal_before",
+      "mean_cosine_to_sampled_normal_after",
+      "fraud_to_normal_neighbor_ratio_before",
+      "fraud_to_normal_neighbor_ratio_after",
+      "n_added_edge_pairs_actual"
+    ],
+    "export_variant_audit": true,
+    "metrics": [
+      "roc_auc",
+      "average_precision",
+      "f1_macro"
+    ],
+    "no_test_leakage": true,
+    "reporting": [
+      "mean",
+      "std"
+    ],
+    "threshold_selection": "best_f1_on_validation"
+  },
+  "experiment_name": "gfd_robustness_benchmark_v3",
+  "graph_representation": {
+    "canonical_view": "homogeneous",
+    "conversion": "dgl.to_homogeneous",
+    "from_source_view": "heterograph",
+    "rationale": "Perturbations may be generated on the source heterograph and then converted back to one homogeneous evaluation view."
+  },
+  "models": [
+    {
+      "category": "baseline",
+      "input": "node_features_only",
+      "model_id": "mlp",
+      "notes": "Required sanity baseline (no message passing).",
+      "type": "mlp"
+    },
+    {
+      "category": "baseline",
+      "input": "graph_plus_node_features",
+      "model_id": "sage",
+      "notes": "One standard message-passing baseline.",
+      "type": "graphsage"
+    },
+    {
+      "category": "specialized",
+      "hparams": {
+        "batch_size": 512,
+        "epochs": 100,
+        "full_neighbors": false,
+        "num_workers": 0,
+        "patience": 10,
+        "sampled_neighbors": [
+          10
+        ]
+      },
+      "model_id": "pmp",
+      "notes": "PMP with benchmark-side sampled-neighbor overrides for feasibility.",
+      "repo_path": "Repos/PMP-master",
+      "type": "pmp"
+    },
+    {
+      "category": "specialized",
+      "hparams": {
+        "hid_dim": 32,
+        "high_order": 1,
+        "lemda": 0.2,
+        "lr": 0.01,
+        "order_d": 2,
+        "weight_decay": 0.0
+      },
+      "model_id": "secgfd",
+      "notes": "SEC-GFD with reduced-cost v3 hyperparameters.",
+      "repo_path": "Repos/SEC-GFD-main",
+      "type": "sec_gfd"
+    }
+  ],
+  "project_topic": "Fraud detection using graphs (node-level anomaly/fraud classification)",
+  "scenarios": [
+    {
+      "allow_self_loops": false,
+      "family": "heterophily",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "rewire_edge_dst_to_opposite_label",
+      "notes": "Report-facing oracle heterophily stress generated before homogenization.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "heterophily",
+      "scenario_id": "heterophily_rewire_oracle",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "family": "heterophily",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "rewire_edge_dst_to_feature_pseudo_opposite_label",
+      "notes": "Feature-derived non-oracle heterophily path retained alongside the oracle reference scenario.",
+      "oracle_labels": false,
+      "oracle_mode": "non_oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "heterophily",
+      "scenario_id": "heterophily_rewire_nonoracle",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "family": "camouflage_feature",
+      "gamma": 1.0,
+      "graph_view_mode": "canonical",
+      "method": "replace_fraud_features_with_normal_features",
+      "notes": "Feature-only camouflage remains separate from relation camouflage in configs and outputs.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "scenario_group": "camouflage",
+      "scenario_id": "camouflage_feature_oracle",
+      "severity_param": "p_cam_feat",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "camouflage_edges_per_node": 2,
+      "family": "camouflage_relation",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "add_relation_camouflage_edges",
+      "notes": "Relation camouflage adds benign-looking neighbors and can remove a fraction of suspicious neighbors.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "remove_suspicious_ratio": 0.5,
+      "scenario_group": "camouflage",
+      "scenario_id": "camouflage_relation_oracle",
+      "severity_param": "p_cam_rel",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "family": "noise",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "add_random_edges",
+      "notes": "Uniform relation-aware edge noise with explicit duplicate, self-loop, and existing-edge policy.",
+      "oracle_labels": false,
+      "oracle_mode": "non_oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "noise",
+      "scenario_id": "noise_edges_uniform",
+      "severity_param": "edge_noise_rate",
+      "severity_values": [
+        0.0,
+        0.1,
+        0.2
+      ],
+      "undirected": false
+    }
+  ],
+  "seeds": {
+    "graph_seeds": [
+      0,
+      1
+    ],
+    "policy": "Graph seeds control perturbation variance; training seeds control model variance.",
+    "training_seeds": [
+      0,
+      1,
+      2
+    ]
+  }
+}
