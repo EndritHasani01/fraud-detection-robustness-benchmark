@@ -1,4 +1,5 @@
-runs/
+runs/*/graphs
+runs/*/data
 __pycache__/
 *.pyc
 .venv/
