@@ -167,6 +167,17 @@ def _count_names(items: list[Any]) -> dict[str, int]:
     return dict(Counter(iter_relation_names(items)))
 
 
+def _sampling_rejection_counters(prefix: str) -> dict[str, int]:
+    return {
+        f"{prefix}_candidate_attempts": 0,
+        f"{prefix}_candidate_rejections_no_change": 0,
+        f"{prefix}_candidate_rejections_self_loop": 0,
+        f"{prefix}_candidate_rejections_existing": 0,
+        f"{prefix}_candidate_rejections_duplicate": 0,
+        f"{prefix}_candidate_rejections_exhausted": 0,
+    }
+
+
 def _two_means_binary_labels(feats, rng):
     import numpy as np
 
@@ -214,8 +225,9 @@ def _rewire_relation_edges(
 
     selected_edge_idx = np.asarray(selected_edge_idx, dtype="int64")
     requested = int(selected_edge_idx.shape[0])
+    counters = _sampling_rejection_counters("n_rewire")
     if requested <= 0:
-        return dst.clone(), {"selected": 0, "actual": 0}
+        return dst.clone(), {"selected": 0, "actual": 0, **counters}
 
     src_np = src.numpy()
     dst_np = dst.numpy()
@@ -230,6 +242,7 @@ def _rewire_relation_edges(
 
     while unresolved.shape[0] > 0 and attempts_left > 0:
         attempts_left -= 1
+        counters["n_rewire_candidate_attempts"] += int(unresolved.shape[0])
         unresolved_src = selected_src[unresolved]
         unresolved_old_dst = selected_old_dst[unresolved]
         unresolved_lbl = source_partition_np[unresolved_src]
@@ -244,20 +257,30 @@ def _rewire_relation_edges(
             candidate[~mask_src_is_pos] = target_pos_nodes[choice]
 
         cand_hash = unresolved_src.astype("int64") * n_nodes + candidate.astype("int64")
-        invalid = candidate == unresolved_old_dst
+        reject_code = np.zeros(unresolved.shape[0], dtype="int8")
+        mask = candidate == unresolved_old_dst
+        reject_code[mask] = 1
         if not policy.allow_self_loops:
-            invalid |= candidate == unresolved_src
+            mask = (candidate == unresolved_src) & (reject_code == 0)
+            reject_code[mask] = 2
         if policy.reject_existing:
-            invalid |= np.isin(cand_hash, existing_hashes, assume_unique=False)
+            mask = np.isin(cand_hash, existing_hashes, assume_unique=False) & (reject_code == 0)
+            reject_code[mask] = 3
         if policy.reject_duplicates and accepted_hashes.shape[0] > 0:
-            invalid |= np.isin(cand_hash, accepted_hashes, assume_unique=False)
+            mask = np.isin(cand_hash, accepted_hashes, assume_unique=False) & (reject_code == 0)
+            reject_code[mask] = 4
 
-        valid_idx = np.nonzero(~invalid)[0]
+        valid_idx = np.nonzero(reject_code == 0)[0]
         if valid_idx.shape[0] > 0:
             dup_mask = _duplicate_mask(cand_hash[valid_idx])
             if dup_mask.any():
-                invalid[valid_idx[dup_mask]] = True
-                valid_idx = np.nonzero(~invalid)[0]
+                reject_code[valid_idx[dup_mask]] = 4
+                valid_idx = np.nonzero(reject_code == 0)[0]
+
+        counters["n_rewire_candidate_rejections_no_change"] += int(np.count_nonzero(reject_code == 1))
+        counters["n_rewire_candidate_rejections_self_loop"] += int(np.count_nonzero(reject_code == 2))
+        counters["n_rewire_candidate_rejections_existing"] += int(np.count_nonzero(reject_code == 3))
+        counters["n_rewire_candidate_rejections_duplicate"] += int(np.count_nonzero(reject_code == 4))
 
         if valid_idx.shape[0] > 0:
             new_dst_np[selected_edge_idx[unresolved[valid_idx]]] = candidate[valid_idx]
@@ -265,10 +288,12 @@ def _rewire_relation_edges(
                 np.concatenate([accepted_hashes, cand_hash[valid_idx]], axis=0) if accepted_hashes.size else cand_hash[valid_idx]
             )
 
-        unresolved = unresolved[invalid]
+        unresolved = unresolved[reject_code != 0]
+
+    counters["n_rewire_candidate_rejections_exhausted"] += int(unresolved.shape[0])
 
     actual = int(np.count_nonzero(new_dst_np[selected_edge_idx] != selected_old_dst))
-    return dst.new_tensor(new_dst_np), {"selected": requested, "actual": actual}
+    return dst.new_tensor(new_dst_np), {"selected": requested, "actual": actual, **counters}
 
 
 def _apply_partition_based_rewire(
@@ -315,6 +340,7 @@ def _apply_partition_based_rewire(
     selected_relation_names: list[Any] = []
     actual_relation_names: list[Any] = []
     total_actual = 0
+    counters = _sampling_rejection_counters("n_rewire")
 
     for relation_key, edge_idx_list in positions_by_relation.items():
         selected_relation_names.extend([relation_key] * len(edge_idx_list))
@@ -334,6 +360,8 @@ def _apply_partition_based_rewire(
         total_actual += actual_count
         actual_relation_names.extend([relation_key] * actual_count)
         new_relation_edges[relation_key] = (src, new_dst)
+        for key in counters:
+            counters[key] += int(relation_info.get(key, 0))
 
     g2 = rebuild_graph_with_edges(base_g, new_relation_edges)
     copy_node_data(g2, base_g)
@@ -347,6 +375,7 @@ def _apply_partition_based_rewire(
             "heterophily_ratio_after": _heterophily_ratio({key: new_relation_edges[key] for key in relation_keys}, audit_labels_np),
             "n_rewired_edges_selected_by_relation": _count_names(selected_relation_names),
             "n_rewired_edges_actual_by_relation": _count_names(actual_relation_names),
+            **counters,
         }
     )
     return g2, info
@@ -535,6 +564,7 @@ def _relation_camouflage(
         "n_suspicious_edges_removed": 0,
         "relation_filter_applied": [],
         "sampling_policy": policy.as_dict(),
+        **_sampling_rejection_counters("n_camouflage_edge"),
     }
     if p_cam_rel <= 0.0:
         return base_g, info
@@ -563,8 +593,10 @@ def _relation_camouflage(
             relation_key = relation_keys[int(rng.integers(0, len(relation_keys), endpoint=False))]
             pending_edges = set(additions_by_relation[relation_key])
             attempts_left = _attempt_round_limit(int(normal_nodes.shape[0]), policy)
+            added = False
             while attempts_left > 0:
                 attempts_left -= 1
+                info["n_camouflage_edge_candidate_attempts"] += 1
                 dst_id = int(normal_nodes[int(rng.integers(0, normal_nodes.shape[0], endpoint=False))])
                 reject_reason = validate_edge_pair(
                     src=int(node_id),
@@ -574,12 +606,16 @@ def _relation_camouflage(
                     policy=policy,
                 )
                 if reject_reason is not None:
+                    info[f"n_camouflage_edge_candidate_rejections_{reject_reason}"] += 1
                     continue
                 additions_by_relation[relation_key].append((int(node_id), dst_id))
                 pending_edges.add((int(node_id), dst_id))
                 existing_by_relation[relation_key].add((int(node_id), dst_id))
                 added_relation_names.append(relation_key)
+                added = True
                 break
+            if not added:
+                info["n_camouflage_edge_candidate_rejections_exhausted"] += 1
 
     removals_by_relation: dict[Any, set[int]] = {key: set() for key in all_relation_edges}
     added_edges_actual = int(sum(len(v) for v in additions_by_relation.values()))
@@ -668,6 +704,7 @@ def _add_random_edges(
         "undirected": bool(undirected),
         "relation_filter_applied": iter_relation_names(relation_keys),
         "sampling_policy": policy.as_dict(),
+        **_sampling_rejection_counters("n_noise"),
     }
     if edge_noise_rate <= 0.0 or n_requested_pairs <= 0:
         return base_g, info
@@ -697,30 +734,45 @@ def _add_random_edges(
 
         while unresolved.shape[0] > 0 and attempts_left > 0:
             attempts_left -= 1
+            info["n_noise_candidate_attempts"] += int(unresolved.shape[0])
             cand_src = rng.integers(0, n_nodes, size=unresolved.shape[0], endpoint=False, dtype="int64")
             cand_dst = rng.integers(0, n_nodes, size=unresolved.shape[0], endpoint=False, dtype="int64")
             cand_hash = cand_src * n_nodes + cand_dst
             duplicate_key = cand_hash if not undirected else (np.minimum(cand_src, cand_dst) * n_nodes + np.maximum(cand_src, cand_dst))
 
-            invalid = np.zeros(unresolved.shape[0], dtype=bool)
+            reject_code = np.zeros(unresolved.shape[0], dtype="int8")
             if not policy.allow_self_loops:
-                invalid |= cand_src == cand_dst
+                mask = cand_src == cand_dst
+                reject_code[mask] = 1
             if policy.reject_existing:
-                invalid |= np.isin(cand_hash, existing_hashes, assume_unique=False)
+                mask = np.isin(cand_hash, existing_hashes, assume_unique=False) & (reject_code == 0)
+                reject_code[mask] = 2
                 if undirected:
-                    invalid |= np.isin(cand_dst * n_nodes + cand_src, existing_hashes, assume_unique=False)
+                    mirror_mask = (
+                        np.isin(cand_dst * n_nodes + cand_src, existing_hashes, assume_unique=False) & (reject_code == 0)
+                    )
+                    reject_code[mirror_mask] = 2
             if policy.reject_duplicates and accepted_hashes.shape[0] > 0:
-                invalid |= np.isin(cand_hash, accepted_hashes, assume_unique=False)
+                mask = np.isin(cand_hash, accepted_hashes, assume_unique=False) & (reject_code == 0)
+                reject_code[mask] = 3
                 if undirected:
-                    invalid |= np.isin(cand_dst * n_nodes + cand_src, accepted_hashes, assume_unique=False)
-                invalid |= np.isin(duplicate_key, accepted_duplicate_keys, assume_unique=False)
+                    mirror_mask = (
+                        np.isin(cand_dst * n_nodes + cand_src, accepted_hashes, assume_unique=False) & (reject_code == 0)
+                    )
+                    reject_code[mirror_mask] = 3
+                duplicate_mask = np.isin(duplicate_key, accepted_duplicate_keys, assume_unique=False) & (reject_code == 0)
+                reject_code[duplicate_mask] = 3
 
-            valid_idx = np.nonzero(~invalid)[0]
+            valid_idx = np.nonzero(reject_code == 0)[0]
             if valid_idx.shape[0] > 0:
                 dup_mask = _duplicate_mask(duplicate_key[valid_idx])
                 if dup_mask.any():
-                    invalid[valid_idx[dup_mask]] = True
-                    valid_idx = np.nonzero(~invalid)[0]
+                    reject_code[valid_idx[dup_mask]] = 3
+                    valid_idx = np.nonzero(reject_code == 0)[0]
+
+            info["n_noise_candidate_rejections_self_loop"] += int(np.count_nonzero(reject_code == 1))
+            info["n_noise_candidate_rejections_existing"] += int(np.count_nonzero(reject_code == 2))
+            info["n_noise_candidate_rejections_duplicate"] += int(np.count_nonzero(reject_code == 3))
 
             if valid_idx.shape[0] > 0:
                 accepted_src = np.concatenate([accepted_src, cand_src[valid_idx]], axis=0)
@@ -738,7 +790,9 @@ def _add_random_edges(
                     else round_duplicate_keys
                 )
 
-            unresolved = unresolved[invalid]
+            unresolved = unresolved[reject_code != 0]
+
+        info["n_noise_candidate_rejections_exhausted"] += int(unresolved.shape[0])
 
         if accepted_src.shape[0] > 0:
             add_src = torch.from_numpy(accepted_src).to(torch.int64)
