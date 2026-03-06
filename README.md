@@ -7,26 +7,28 @@ This repository contains a reproducible evaluation harness for graph-based fraud
 - `pmp` (LA-SAGE-S from `Repos/PMP-master`)
 - `secgfd` (from `Repos/SEC-GFD-main`)
 
-The benchmark caches graph variants once, runs model evaluations against those cached graphs, writes a unified `results.csv`, and generates plot-ready CSV summaries and figures for the final report.
+The benchmark caches graph variants once, runs model evaluations against those cached graphs, writes a unified `results.csv`, exports a companion `variant_audit.csv` for requested versus realized perturbation effects, and generates plot-ready CSV summaries and figures for the final report.
 
-## What Changed In V2
+The current implementation contract is documented in:
 
-- Resumable execution is now the default: training stages skip completed run keys already present in `results.csv`.
-- Graph seeds are decoupled from training seeds via `seeds.graph_seeds` and `seeds.training_seeds`.
-- A second evaluation protocol is available: train once on the clean graph and evaluate on all cached variants (`--stage shift` or `--stage matrix --protocol train_clean_eval_all`).
-- PMP and SEC-GFD now support benchmark-side runtime controls through config `hparams` and SEC-GFD CLI overrides.
-- Training stages print a preflight summary, per-run progress lines, and rolling ETA.
-- `--models` can restrict any training stage to a subset such as `mlp,sage` or `pmp,secgfd`.
-- The plots stage now emits completeness diagnostics, protocol-aware outputs, oracle-disclosure columns, optional bootstrap confidence intervals, and cross-split summary CSVs.
+- [docs/V3_BENCHMARK_REFERENCE.md](docs/V3_BENCHMARK_REFERENCE.md) for the technical benchmark contract, scenario semantics, audit artifacts, and interpretation limits
+- [docs/STAKEHOLDER_GUIDE.md](docs/STAKEHOLDER_GUIDE.md) for a plain-language summary of what the benchmark does and does not claim
 
-`configs/exp_yelpchi_v1.json` remains frozen for backward-compatible reruns. If `graph_seeds` is absent, the graph stage falls back to `training_seeds`.
+## What V3 Adds
+
+- Feature camouflage and relation camouflage are separate scenario families with distinct audit metrics.
+- Heterophily rewiring now includes both oracle and non-oracle paths.
+- Relation-aware scenarios can perturb the source heterograph before converting back to the canonical evaluation view.
+- `variant_audit.csv` records requested and realized perturbation strength per graph variant.
+- The plots stage joins performance and audit evidence through `plots/performance_audit_join.csv`.
+- Protocol and oracle status remain visible in downstream summary CSVs and plots.
 
 ## Repository Layout
 
 - `benchmark/`: runner, stage implementations, shared helpers, result/schema utilities
 - `configs/`: frozen experiment definitions
 - `Repos/`: vendored research repositories used through thin adapters
-- `todos/`: v1 and v2 implementation tasks
+- `todos/`: implementation tasks for the benchmark iterations
 - `tests/`: regression tests for the benchmark harness
 - `FINAL_PROJECT_GUIDE.md`: report methodology and deliverables
 - `Paper_Summary.md`: task 1 write-up
@@ -55,9 +57,12 @@ py -m pip install torchdata==0.8.0 PyYAML pydantic matplotlib
 | Config | Purpose | Models | Seeds |
 |---|---|---|---|
 | `configs/exp_yelpchi_v1.json` | Frozen v1 experiment for backward-compatible reruns | `mlp`, `sage`, `pmp`, `secgfd` | No `graph_seeds`; graph stage falls back to `training_seeds` |
-| `configs/exp_yelpchi_v2_fast.json` | Fast developer smoke test | `mlp`, `sage` | 1 graph seed, 1 training seed |
-| `configs/exp_yelpchi_v2.json` | Main v2 benchmark | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 3 training seeds |
-| `configs/exp_yelpchi_v2_full.json` | Larger v2 run with fuller severity curves | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 5 training seeds |
+| `configs/exp_yelpchi_v2_fast.json` | Historical v2 smoke test | `mlp`, `sage` | 1 graph seed, 1 training seed |
+| `configs/exp_yelpchi_v2.json` | Historical v2 benchmark | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 3 training seeds |
+| `configs/exp_yelpchi_v2_full.json` | Historical v2 fuller-curve run | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 5 training seeds |
+| `configs/exp_yelpchi_v3_fast.json` | Fast v3 smoke test across the full scenario surface | `mlp`, `sage` | 1 graph seed, 1 training seed |
+| `configs/exp_yelpchi_v3.json` | Main v3 benchmark | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 3 training seeds |
+| `configs/exp_yelpchi_v3_full.json` | Larger v3 run with fuller severity curves | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 5 training seeds |
 
 `configs/README.md` summarizes the same set of frozen experiment definitions.
 
@@ -66,50 +71,50 @@ py -m pip install torchdata==0.8.0 PyYAML pydantic matplotlib
 Fast end-to-end smoke test on CPU:
 
 ```powershell
-py -m benchmark.run --config configs/exp_yelpchi_v2_fast.json --stage graphs
-py -m benchmark.run --config configs/exp_yelpchi_v2_fast.json --stage baselines
-py -m benchmark.run --config configs/exp_yelpchi_v2_fast.json --stage plots
+py -m benchmark.run --config configs/exp_yelpchi_v3_fast.json --stage graphs
+py -m benchmark.run --config configs/exp_yelpchi_v3_fast.json --stage baselines
+py -m benchmark.run --config configs/exp_yelpchi_v3_fast.json --stage plots
 ```
 
-Main v2 benchmark with all integrated models:
+Main v3 benchmark with all integrated models:
 
 ```powershell
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage graphs
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage matrix
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage plots --ci
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage graphs
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage matrix
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage plots --ci
 ```
 
 Shift-protocol benchmark: train on the clean graph once, evaluate all variants:
 
 ```powershell
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage graphs
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage matrix --protocol train_clean_eval_all
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage plots --ci
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage graphs
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage matrix --protocol train_clean_eval_all
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage plots --ci
 ```
 
 Run only expensive models on an existing cache:
 
 ```powershell
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage matrix --models pmp,secgfd
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage matrix --models pmp,secgfd
 ```
 
 Quick sanity check on the clean graph only:
 
 ```powershell
-py -m benchmark.run --config configs/exp_yelpchi_v2.json --stage baselines --only-clean --max-training-seeds 1
+py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage baselines --only-clean --max-training-seeds 1
 ```
 
 ## Stage Reference
 
 | Stage | What it does | Main outputs |
 |---|---|---|
-| `graphs` | Builds deterministic split masks, caches the base graph and all configured perturbation variants, and writes the variant ledger. | `config.json`, `graphs/`, `graph_variants.csv`, `results.csv` header |
+| `graphs` | Builds deterministic split masks, caches the base graph and all configured perturbation variants, and writes the variant ledger plus perturbation audit. | `config.json`, `graphs/`, `graph_variants.csv`, `variant_audit.csv`, `results.csv` header |
 | `baselines` | Trains/evaluates `mlp` and `sage` on cached graphs using the standard per-variant training protocol. | `results.csv`, `results_summary_baselines.csv` |
 | `pmp` | Trains/evaluates PMP on cached graphs with benchmark-side config overrides merged on top of the research repo YAML. | `results.csv`, `results_summary_pmp.csv` |
 | `secgfd` | Trains/evaluates SEC-GFD on cached graphs with benchmark-side hparams and optional CLI overrides. | `results.csv`, `results_summary_secgfd.csv` |
 | `shift` | Trains each selected model once on the clean graph for a split and evaluates that artifact on every selected variant. | `results.csv`, `results_summary_shift.csv` |
 | `matrix` | Launches the integrated model matrix. With `--protocol train_clean_eval_all`, it dispatches to the shift protocol instead of per-variant training. | Same outputs as the invoked child stages |
-| `plots` | Reads `results.csv`, checks completeness, and writes figures plus plot-ready CSV summaries under `runs/<exp>/plots/`. | `plots/*.csv`, `plots/<protocol>/<dataset>/<split>/*.png` |
+| `plots` | Reads `results.csv`, joins it with the variant ledger and audit artifact, checks completeness, and writes figures plus plot-ready CSV summaries under `runs/<exp>/plots/`. | `plots/*.csv`, `plots/<protocol>/<dataset>/<split>/*.png` |
 
 ## Important CLI Flags
 
@@ -138,6 +143,7 @@ Core artifacts:
 - `config.json`: frozen copy of the config used for that run
 - `graphs/`: cached base graph and perturbation variants
 - `graph_variants.csv`: graph ledger with `graph_seed`, `scenario_applied`, and `oracle_labels`
+- `variant_audit.csv`: companion perturbation audit keyed by `(dataset_id, split_id, scenario_id, severity, graph_seed)`
 - `results.csv`: unified per-run results across all models and protocols
 
 Per-stage summaries:
@@ -152,9 +158,12 @@ Plot/report artifacts under `plots/`:
 - `summary_curves.csv`
 - `performance_drop_max_stress.csv`
 - `robustness_scores.csv`
+- `audit_curves.csv`
 - `summary_curves_cross_split.csv`
 - `performance_drop_max_stress_cross_split.csv`
 - `robustness_scores_cross_split.csv`
+- `audit_curves_cross_split.csv`
+- `performance_audit_join.csv`
 - `missing_or_error_runs.csv`
 - `plots/<protocol>/<dataset>/<split>/curve__<scenario>__<metric>.png`
 - `plots/<protocol>/<dataset>/across_splits/*.png` when multiple `data_splits` are present
@@ -167,7 +176,7 @@ The unique run key in `results.csv` is:
 (dataset_id, split_id, scenario_id, severity, graph_seed, training_seed, model_id, protocol)
 ```
 
-Important columns added or emphasized in v2:
+Important columns added or emphasized across v2 and v3:
 
 - `protocol`: `train_on_variant` or `train_clean_eval_all`
 - `train_graph_ref`: path to the graph used for training; for shift runs this points at the clean graph
@@ -178,10 +187,14 @@ Important columns added or emphasized in v2:
 ## Reporting And Disclosure Notes
 
 - Oracle perturbations are explicitly disclosed. `graph_variants.csv` carries `oracle_labels`, and the plots stage propagates that field into summary CSVs and plot legends/titles.
+- `variant_audit.csv` is the required companion artifact for interpreting scenario strength. Use realized audit metrics instead of raw severity alone when you need to justify how strongly a graph was perturbed.
 - The plots stage is protocol-aware. Standard and shift-protocol runs are written to separate output subdirectories and remain distinguishable in plot CSVs.
+- `plots/performance_audit_join.csv` provides the report-stage join between performance rows and perturbation evidence.
 - With `--ci`, plot CSVs include `ci_lower` and `ci_upper` columns in addition to mean/std.
 - Cross-split summary CSVs are always written; they are most useful when the config defines multiple `data_splits`.
 - The plots stage prints a completeness summary and writes `missing_or_error_runs.csv` so report gaps are visible before figures are used.
+
+Interpretation boundaries for the current benchmark are intentional: this is a controlled static stress benchmark, not a realistic adversarial fraud simulator. Severity is family-specific, oracle scenarios must be disclosed, and `train_on_variant` should not be conflated with `train_clean_eval_all`.
 
 ## Reproducibility
 
