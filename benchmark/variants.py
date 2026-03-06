@@ -82,6 +82,16 @@ def read_variants_csv(path: Path) -> list[VariantRow]:
     return rows
 
 
+def require_variants_csv_rows(path: Path) -> list[VariantRow]:
+    rows = read_variants_csv(path)
+    if rows:
+        return rows
+    raise RuntimeError(
+        f"No rows found in {path}. Re-run `py -m benchmark.run --stage graphs ...`; "
+        "a previous graphs run may have been interrupted."
+    )
+
+
 def filter_variants(
     variants: Sequence[Any],
     *,

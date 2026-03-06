@@ -68,117 +68,129 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
 
     # Ensure CSVs exist with correct schema. If --force is set, start fresh.
     ensure_results_csv(paths.results_csv_path, overwrite=force)
-    ensure_csv_header(paths.variants_csv_path, VARIANTS_COLUMNS, overwrite=force)
+    variants_tmp_path = paths.out_dir / f"{paths.variants_csv_path.name}.tmp"
+    if variants_tmp_path.exists():
+        variants_tmp_path.unlink()
+    if paths.variants_csv_path.exists():
+        paths.variants_csv_path.unlink()
+    ensure_csv_header(variants_tmp_path, VARIANTS_COLUMNS, overwrite=True)
 
     experiment_name = cfg["experiment_name"]
     graph_seeds = get_graph_seeds(cfg)
+    try:
+        for dataset_cfg in cfg["datasets"]:
+            dataset_id = dataset_cfg["dataset_id"]
+            source_name = dataset_cfg["source_name"]
 
-    for dataset_cfg in cfg["datasets"]:
-        dataset_id = dataset_cfg["dataset_id"]
+            for split_cfg in cfg["data_splits"]:
+                split_id = split_cfg["split_id"]
+                split_seed = int(split_cfg["split_seed"])
 
-        for split_cfg in cfg["data_splits"]:
-            split_id = split_cfg["split_id"]
-            split_seed = int(split_cfg["split_seed"])
+                print(f"[graphs] dataset={dataset_id} split={split_id} loading source={source_name}")
+                g_base = _make_base_graph(cfg, dataset_cfg, split_cfg, out_dir=paths.out_dir, force_reload=force_reload)
+                base_p = base_graph_path(paths.graphs_dir, dataset_id, split_id)
 
-            g_base = _make_base_graph(cfg, dataset_cfg, split_cfg, out_dir=paths.out_dir, force_reload=force_reload)
-            base_p = base_graph_path(paths.graphs_dir, dataset_id, split_id)
-
-            base_meta = {
-                "experiment_name": experiment_name,
-                "dataset_id": dataset_id,
-                "split_id": split_id,
-                "split_seed": split_seed,
-                "train_size": float(split_cfg["train_size"]),
-                "val_size": float(split_cfg["val_size"]),
-                "canonical_view": cfg["graph_representation"]["canonical_view"],
-                "created_unix": time.time(),
-            }
-            save_graph(base_p, g_base, base_meta, force=force)
-
-            base_stats = compute_graph_stats(g_base)
-
-            # Record base as a variant row too (scenario_id="clean").
-            append_csv_row(
-                paths.variants_csv_path,
-                VARIANTS_COLUMNS,
-                {
+                base_meta = {
                     "experiment_name": experiment_name,
                     "dataset_id": dataset_id,
                     "split_id": split_id,
-                    "graph_seed": split_seed,
-                    "scenario_id": "clean",
-                    "severity": 0.0,
-                    "oracle_labels": False,
-                    "scenario_applied": True,
-                    "base_graph_path": str(base_p.graph_bin_path),
-                    "graph_path": str(base_p.graph_bin_path),
-                    **base_stats,
-                },
-            )
+                    "split_seed": split_seed,
+                    "train_size": float(split_cfg["train_size"]),
+                    "val_size": float(split_cfg["val_size"]),
+                    "canonical_view": cfg["graph_representation"]["canonical_view"],
+                    "created_unix": time.time(),
+                }
+                save_graph(base_p, g_base, base_meta, force=force)
 
-            for scenario_cfg in cfg["scenarios"]:
-                scenario_id = scenario_cfg["scenario_id"]
-                oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
-                severity_values = scenario_cfg["severity_values"]
-                scenario_params = {k: v for k, v in scenario_cfg.items() if k not in {"severity_values"}}
+                base_stats = compute_graph_stats(g_base)
 
-                for severity in severity_values:
-                    for graph_seed in graph_seeds:
-                        spec = ScenarioSpec(
-                            scenario_id=scenario_id,
-                            family=str(scenario_cfg.get("family", "")),
-                            method=str(scenario_cfg.get("method", "")),
-                            oracle_labels=oracle_labels,
-                            severity_param=str(scenario_cfg.get("severity_param", "severity")),
-                            severity=float(severity),
-                            graph_seed=int(graph_seed),
-                            params=scenario_params,
-                        )
-                        var_p = variant_graph_path(
-                            paths.graphs_dir, dataset_id, split_id, scenario_id, float(severity), int(graph_seed)
-                        )
+                # Record base as a variant row too (scenario_id="clean").
+                append_csv_row(
+                    variants_tmp_path,
+                    VARIANTS_COLUMNS,
+                    {
+                        "experiment_name": experiment_name,
+                        "dataset_id": dataset_id,
+                        "split_id": split_id,
+                        "graph_seed": split_seed,
+                        "scenario_id": "clean",
+                        "severity": 0.0,
+                        "oracle_labels": False,
+                        "scenario_applied": True,
+                        "base_graph_path": str(base_p.graph_bin_path),
+                        "graph_path": str(base_p.graph_bin_path),
+                        **base_stats,
+                    },
+                )
 
-                        g_var, applied, info = apply_scenario(g_base, spec)
+                for scenario_cfg in cfg["scenarios"]:
+                    scenario_id = scenario_cfg["scenario_id"]
+                    oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
+                    severity_values = scenario_cfg["severity_values"]
+                    scenario_params = {k: v for k, v in scenario_cfg.items() if k not in {"severity_values"}}
 
-                        var_meta = {
-                            **base_meta,
-                            "base_graph_bin": str(base_p.graph_bin_path.resolve()),
-                            "scenario_id": scenario_id,
-                            "severity": float(severity),
-                            "graph_seed": int(graph_seed),
-                            "oracle_labels": oracle_labels,
-                            "scenario_applied": bool(applied),
-                            "scenario_method": spec.method,
-                            "scenario_params": scenario_params,
-                            "scenario_info": info,
-                        }
+                    for severity in severity_values:
+                        for graph_seed in graph_seeds:
+                            spec = ScenarioSpec(
+                                scenario_id=scenario_id,
+                                family=str(scenario_cfg.get("family", "")),
+                                method=str(scenario_cfg.get("method", "")),
+                                oracle_labels=oracle_labels,
+                                severity_param=str(scenario_cfg.get("severity_param", "severity")),
+                                severity=float(severity),
+                                graph_seed=int(graph_seed),
+                                params=scenario_params,
+                            )
+                            var_p = variant_graph_path(
+                                paths.graphs_dir, dataset_id, split_id, scenario_id, float(severity), int(graph_seed)
+                            )
 
-                        if applied:
-                            save_graph(var_p, g_var, var_meta, force=force)
-                            graph_path_for_row = var_p.graph_bin_path
-                        else:
-                            # No-op variants are stored as refs to avoid duplicating large binaries.
-                            save_graph_ref(var_p, base_p.graph_bin_path, var_meta, force=force)
-                            graph_path_for_row = base_p.graph_bin_path
+                            g_var, applied, info = apply_scenario(g_base, spec)
 
-                        var_stats = compute_graph_stats(g_var)
-                        append_csv_row(
-                            paths.variants_csv_path,
-                            VARIANTS_COLUMNS,
-                            {
-                                "experiment_name": experiment_name,
-                                "dataset_id": dataset_id,
-                                "split_id": split_id,
-                                "graph_seed": int(graph_seed),
+                            var_meta = {
+                                **base_meta,
+                                "base_graph_bin": str(base_p.graph_bin_path.resolve()),
                                 "scenario_id": scenario_id,
                                 "severity": float(severity),
+                                "graph_seed": int(graph_seed),
                                 "oracle_labels": oracle_labels,
                                 "scenario_applied": bool(applied),
-                                "base_graph_path": str(base_p.graph_bin_path),
-                                "graph_path": str(graph_path_for_row),
-                                **var_stats,
-                            },
-                        )
+                                "scenario_method": spec.method,
+                                "scenario_params": scenario_params,
+                                "scenario_info": info,
+                            }
+
+                            if applied:
+                                save_graph(var_p, g_var, var_meta, force=force)
+                                graph_path_for_row = var_p.graph_bin_path
+                            else:
+                                # No-op variants are stored as refs to avoid duplicating large binaries.
+                                save_graph_ref(var_p, base_p.graph_bin_path, var_meta, force=force)
+                                graph_path_for_row = base_p.graph_bin_path
+
+                            var_stats = compute_graph_stats(g_var)
+                            append_csv_row(
+                                variants_tmp_path,
+                                VARIANTS_COLUMNS,
+                                {
+                                    "experiment_name": experiment_name,
+                                    "dataset_id": dataset_id,
+                                    "split_id": split_id,
+                                    "graph_seed": int(graph_seed),
+                                    "scenario_id": scenario_id,
+                                    "severity": float(severity),
+                                    "oracle_labels": oracle_labels,
+                                    "scenario_applied": bool(applied),
+                                    "base_graph_path": str(base_p.graph_bin_path),
+                                    "graph_path": str(graph_path_for_row),
+                                    **var_stats,
+                                },
+                            )
+
+        variants_tmp_path.replace(paths.variants_csv_path)
+    finally:
+        if variants_tmp_path.exists():
+            variants_tmp_path.unlink()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -291,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
     requested_model_ids = parse_requested_model_ids(args.models)
 
     t0 = time.time()
+    stage_status = "done"
     try:
         if args.stage == "graphs":
             print_graphs_preflight(cfg)
@@ -409,12 +422,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             raise RuntimeError(f"Unknown stage: {args.stage}")
+    except KeyboardInterrupt:
+        stage_status = "interrupted"
+        print(f"[run] INTERRUPTED: stage={args.stage}")
+        return 130
     except Exception as e:
+        stage_status = "failed"
         print(f"[run] ERROR: {e}")
         return 1
     finally:
         dt = time.time() - t0
-        print(f"[run] stage={args.stage} done in {dt:.2f}s; out={out_dir}")
+        print(f"[run] stage={args.stage} {stage_status} in {dt:.2f}s; out={out_dir}")
     return 0
 
 

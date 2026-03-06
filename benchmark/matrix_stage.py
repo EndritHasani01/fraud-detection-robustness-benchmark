@@ -12,7 +12,7 @@ from .preflight import (
     warn_no_matching_models,
 )
 from .results import PROTOCOL_TRAIN_CLEAN_EVAL_ALL, PROTOCOL_TRAIN_ON_VARIANT, load_completed_keys
-from .variants import filter_variants, read_variants_csv
+from .variants import filter_variants, require_variants_csv_rows
 
 
 def run_matrix_stage(
@@ -67,7 +67,7 @@ def run_matrix_stage(
         warn_no_matching_models("matrix", selected_model_ids)
         return
 
-    variants = read_variants_csv(variants_csv)
+    variants = require_variants_csv_rows(variants_csv)
     filtered_variants = filter_variants(
         variants,
         include_noop=bool(include_noop),

@@ -11,7 +11,7 @@ from unittest import mock
 from benchmark.matrix_stage import run_matrix_stage
 from benchmark.preflight import build_expected_run_keys, summarize_training_preflight
 from benchmark.results import PROTOCOL_TRAIN_ON_VARIANT, append_result_row, ensure_results_csv
-from benchmark.run import main
+from benchmark.run import _graphs_only, main
 
 
 def _write_variant_csv(path: Path) -> None:
@@ -107,6 +107,62 @@ class RunModelsCliTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertTrue(stage_mock.call_args.kwargs["ci"])
+
+    def test_run_main_reports_interrupted_stage_status(self) -> None:
+        cfg = {"experiment_name": "exp"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                with mock.patch("benchmark.run.load_json", return_value=cfg):
+                    with mock.patch("benchmark.run.validate_config"):
+                        with mock.patch("benchmark.run.print_graphs_preflight"):
+                            with mock.patch("benchmark.run._graphs_only", side_effect=KeyboardInterrupt):
+                                rc = main(
+                                    [
+                                        "--config",
+                                        "dummy.json",
+                                        "--out",
+                                        tmpdir,
+                                        "--stage",
+                                        "graphs",
+                                    ]
+                                )
+
+        self.assertEqual(rc, 130)
+        log = stdout.getvalue()
+        self.assertIn("[run] INTERRUPTED: stage=graphs", log)
+        self.assertIn("[run] stage=graphs interrupted", log)
+        self.assertNotIn("[run] stage=graphs done", log)
+
+    def test_graphs_only_removes_partial_variants_manifest_on_failure(self) -> None:
+        cfg = {
+            "experiment_name": "exp",
+            "graph_representation": {"canonical_view": "homogeneous"},
+            "seeds": {"training_seeds": [7], "graph_seeds": [11]},
+            "datasets": [{"dataset_id": "yelpchi", "source_name": "yelp"}],
+            "data_splits": [
+                {
+                    "split_id": "split_0",
+                    "split_seed": 13,
+                    "train_size": 0.6,
+                    "val_size": 0.2,
+                }
+            ],
+            "scenarios": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            stale_manifest = out_dir / "graph_variants.csv"
+            _write_variant_csv(stale_manifest)
+
+            with mock.patch("benchmark.run._make_base_graph", side_effect=RuntimeError("boom")):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    _graphs_only(cfg, out_dir=out_dir, force=False, force_reload=False)
+
+            self.assertFalse(stale_manifest.exists())
+            self.assertFalse((out_dir / "graph_variants.csv.tmp").exists())
 
 
 class StageModelFilterTests(unittest.TestCase):

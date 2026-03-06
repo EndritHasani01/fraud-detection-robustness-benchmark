@@ -35,7 +35,7 @@ from .variants import (
     class_weights_from_train_labels,
     filter_variants,
     load_graph_bin,
-    read_variants_csv,
+    require_variants_csv_rows,
     set_seeds,
 )
 
@@ -319,9 +319,7 @@ def run_baselines_stage(
     ensure_results_csv(results_csv, overwrite=bool(force))
     completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
-    variants = read_variants_csv(variants_csv)
-    if not variants:
-        raise RuntimeError(f"No rows found in {variants_csv}")
+    variants = require_variants_csv_rows(variants_csv)
 
     training_seeds = get_training_seeds(cfg)
     if max_training_seeds is not None:

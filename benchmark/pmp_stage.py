@@ -30,7 +30,7 @@ from .variants import (
     class_weights_from_train_labels,
     filter_variants,
     load_graph_bin,
-    read_variants_csv,
+    require_variants_csv_rows,
     set_seeds,
 )
 
@@ -515,9 +515,7 @@ def run_pmp_stage(
     ensure_results_csv(results_csv, overwrite=bool(force))
     completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
-    variants = read_variants_csv(variants_csv)
-    if not variants:
-        raise RuntimeError(f"No rows found in {variants_csv}")
+    variants = require_variants_csv_rows(variants_csv)
 
     dataset_cfg_by_id = {d["dataset_id"]: d for d in cfg.get("datasets", [])}
 

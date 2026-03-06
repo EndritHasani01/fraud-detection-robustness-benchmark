@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from benchmark.variants import VariantRow, filter_variants, read_variants_csv
+from benchmark.variants import VariantRow, filter_variants, read_variants_csv, require_variants_csv_rows
 
 
 def _write_variant_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -153,6 +153,14 @@ class VariantHelpersTests(unittest.TestCase):
             [v.graph_path for v in filter_variants(variants, include_noop=True, only_clean=False, max_variants=2)],
             ["clean.bin", "noop.bin"],
         )
+
+    def test_require_variants_csv_rows_rejects_header_only_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "graph_variants.csv"
+            _write_variant_csv(path, [])
+
+            with self.assertRaisesRegex(RuntimeError, "previous graphs run may have been interrupted"):
+                require_variants_csv_rows(path)
 
 
 if __name__ == "__main__":

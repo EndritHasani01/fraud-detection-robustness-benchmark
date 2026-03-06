@@ -25,7 +25,7 @@ from .results import (
     write_result_row,
 )
 from .summarize import summarize_results_by_training_seed
-from .variants import VariantRow, filter_variants, load_graph_bin, read_variants_csv, set_seeds
+from .variants import VariantRow, filter_variants, load_graph_bin, require_variants_csv_rows, set_seeds
 
 SECGFD_DEFAULT_HPARAMS = {
     "hid_dim": 32,
@@ -496,9 +496,7 @@ def run_secgfd_stage(
     ensure_results_csv(results_csv, overwrite=bool(force))
     completed_keys = load_completed_keys(results_csv, retry_errors=bool(retry_errors)) if skip_existing else set()
 
-    variants = read_variants_csv(variants_csv)
-    if not variants:
-        raise RuntimeError(f"No rows found in {variants_csv}")
+    variants = require_variants_csv_rows(variants_csv)
 
     sec_cfg = None
     for m in cfg.get("models", []):
