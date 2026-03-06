@@ -1,0 +1,199 @@
+{
+  "created_date": "2026-03-06",
+  "data_splits": [
+    {
+      "policy": "Single fixed split reused across all scenarios and severities.",
+      "split_id": "s0",
+      "split_seed": 717,
+      "train_size": 0.4,
+      "val_size": 0.2
+    }
+  ],
+  "datasets": [
+    {
+      "dataset_id": "yelpchi",
+      "notes": "YelpChi as exposed by DGL FraudDataset.",
+      "source": "dgl.data.FraudDataset",
+      "source_name": "yelp"
+    }
+  ],
+  "disclosures": [
+    "Oracle scenarios remain controlled stress tests and must be disclosed as such in reporting.",
+    "Relation-aware scenarios are generated on the source heterograph before converting back to the shared homogeneous evaluation view.",
+    "This config is intended for quick pipeline validation rather than publishable results."
+  ],
+  "evaluation": {
+    "audit_metrics": [
+      "n_rewired_edges_actual",
+      "heterophily_ratio_before",
+      "heterophily_ratio_after",
+      "mean_cosine_to_sampled_normal_before",
+      "mean_cosine_to_sampled_normal_after",
+      "fraud_to_normal_neighbor_ratio_before",
+      "fraud_to_normal_neighbor_ratio_after",
+      "n_added_edge_pairs_actual"
+    ],
+    "export_variant_audit": true,
+    "metrics": [
+      "roc_auc",
+      "average_precision",
+      "f1_macro"
+    ],
+    "no_test_leakage": true,
+    "reporting": [
+      "mean",
+      "std"
+    ],
+    "threshold_selection": "best_f1_on_validation"
+  },
+  "experiment_name": "gfd_robustness_v3_dev",
+  "graph_representation": {
+    "canonical_view": "homogeneous",
+    "conversion": "dgl.to_homogeneous",
+    "from_source_view": "heterograph",
+    "rationale": "Perturbations may be generated on the source heterograph and then converted back to one homogeneous evaluation view."
+  },
+  "models": [
+    {
+      "category": "baseline",
+      "input": "node_features_only",
+      "model_id": "mlp",
+      "notes": "Fast baseline sanity check model.",
+      "type": "mlp"
+    },
+    {
+      "category": "baseline",
+      "input": "graph_plus_node_features",
+      "model_id": "sage",
+      "notes": "Fast GNN sanity check model.",
+      "type": "graphsage"
+    }
+  ],
+  "project_topic": "Fraud detection using graphs (node-level anomaly/fraud classification)",
+  "scenarios": [
+    {
+      "allow_self_loops": false,
+      "family": "heterophily",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "rewire_edge_dst_to_opposite_label",
+      "notes": "Minimal oracle heterophily check generated on the source relations before homogenization.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "heterophily",
+      "scenario_id": "heterophily_rewire_oracle",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "family": "heterophily",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "rewire_edge_dst_to_feature_pseudo_opposite_label",
+      "notes": "Non-oracle heterophily path using feature-derived pseudo partitions instead of true labels.",
+      "oracle_labels": false,
+      "oracle_mode": "non_oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "heterophily",
+      "scenario_id": "heterophily_rewire_nonoracle",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.3
+      ]
+    },
+    {
+      "family": "camouflage_feature",
+      "gamma": 1.0,
+      "graph_view_mode": "canonical",
+      "method": "replace_fraud_features_with_normal_features",
+      "notes": "Feature-only camouflage stays on the canonical graph because it does not depend on relation structure.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "scenario_group": "camouflage",
+      "scenario_id": "camouflage_feature_oracle",
+      "severity_param": "p_cam_feat",
+      "severity_values": [
+        0.0,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "camouflage_edges_per_node": 2,
+      "family": "camouflage_relation",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "add_relation_camouflage_edges",
+      "notes": "Relation camouflage adds benign-looking neighbors per relation and can remove part of the suspicious neighborhood.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "remove_suspicious_ratio": 0.5,
+      "scenario_group": "camouflage",
+      "scenario_id": "camouflage_relation_oracle",
+      "severity_param": "p_cam_rel",
+      "severity_values": [
+        0.0,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "family": "noise",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "add_random_edges",
+      "notes": "Uniform relation-aware edge noise with one documented uniqueness policy shared with rewiring.",
+      "oracle_labels": false,
+      "oracle_mode": "non_oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "noise",
+      "scenario_id": "noise_edges_uniform",
+      "severity_param": "edge_noise_rate",
+      "severity_values": [
+        0.0,
+        0.2
+      ],
+      "undirected": false
+    }
+  ],
+  "seeds": {
+    "graph_seeds": [
+      0
+    ],
+    "policy": "Single graph seed and single training seed for fast end-to-end validation.",
+    "training_seeds": [
+      0
+    ]
+  }
+}
