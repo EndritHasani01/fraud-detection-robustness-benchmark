@@ -17,6 +17,7 @@ class ExperimentPaths:
     config_copy_path: Path
     results_csv_path: Path
     variants_csv_path: Path
+    variant_audit_csv_path: Path
     graphs_dir: Path
 
 
@@ -162,6 +163,7 @@ def init_paths(out_dir: Path) -> ExperimentPaths:
         config_copy_path=out_dir / "config.json",
         results_csv_path=out_dir / "results.csv",
         variants_csv_path=out_dir / "graph_variants.csv",
+        variant_audit_csv_path=out_dir / "variant_audit.csv",
         graphs_dir=graphs_dir,
     )
 

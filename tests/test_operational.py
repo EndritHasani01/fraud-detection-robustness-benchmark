@@ -155,14 +155,18 @@ class RunModelsCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir)
             stale_manifest = out_dir / "graph_variants.csv"
+            stale_audit = out_dir / "variant_audit.csv"
             _write_variant_csv(stale_manifest)
+            stale_audit.write_text("dataset_id,split_id\n", encoding="utf-8")
 
             with mock.patch("benchmark.run._make_source_graph", side_effect=RuntimeError("boom")):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
                     _graphs_only(cfg, out_dir=out_dir, force=False, force_reload=False)
 
             self.assertFalse(stale_manifest.exists())
+            self.assertFalse(stale_audit.exists())
             self.assertFalse((out_dir / "graph_variants.csv.tmp").exists())
+            self.assertFalse((out_dir / "variant_audit.csv.tmp").exists())
 
     def test_graphs_only_uses_source_graph_for_heterograph_aware_generation(self) -> None:
         cfg = {
@@ -231,6 +235,11 @@ class RunModelsCliTests(unittest.TestCase):
             self.assertEqual(to_can_mock.call_count, 2)
             save_graph_mock.assert_called()
             save_ref_mock.assert_not_called()
+            with (out_dir / "variant_audit.csv").open("r", newline="", encoding="utf-8") as f:
+                audit_rows = list(csv.DictReader(f))
+            self.assertEqual(len(audit_rows), 2)
+            stressed_row = next(row for row in audit_rows if row["scenario_id"] == "camouflage_relation_oracle")
+            self.assertEqual(stressed_row["graph_view_mode"], "heterograph_aware_generation")
 
 
 class StageModelFilterTests(unittest.TestCase):

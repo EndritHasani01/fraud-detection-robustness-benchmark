@@ -15,6 +15,7 @@ from .results import (
     ensure_csv_header,
     ensure_results_csv,
 )
+from .scenario_audit import append_variant_audit_row, build_variant_audit_row, ensure_variant_audit_csv
 
 
 def _default_out_dir(cfg: dict, config_path: Path) -> Path:
@@ -84,11 +85,17 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
     # Ensure CSVs exist with correct schema. If --force is set, start fresh.
     ensure_results_csv(paths.results_csv_path, overwrite=force)
     variants_tmp_path = paths.out_dir / f"{paths.variants_csv_path.name}.tmp"
+    variant_audit_tmp_path = paths.out_dir / f"{paths.variant_audit_csv_path.name}.tmp"
     if variants_tmp_path.exists():
         variants_tmp_path.unlink()
+    if variant_audit_tmp_path.exists():
+        variant_audit_tmp_path.unlink()
     if paths.variants_csv_path.exists():
         paths.variants_csv_path.unlink()
+    if paths.variant_audit_csv_path.exists():
+        paths.variant_audit_csv_path.unlink()
     ensure_csv_header(variants_tmp_path, VARIANTS_COLUMNS, overwrite=True)
+    ensure_variant_audit_csv(variant_audit_tmp_path, overwrite=True)
 
     experiment_name = cfg["experiment_name"]
     graph_seeds = get_graph_seeds(cfg)
@@ -138,6 +145,28 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                         "graph_path": str(base_p.graph_bin_path),
                         **base_stats,
                     },
+                )
+                append_variant_audit_row(
+                    variant_audit_tmp_path,
+                    build_variant_audit_row(
+                        experiment_name=experiment_name,
+                        dataset_id=dataset_id,
+                        split_id=split_id,
+                        scenario_id="clean",
+                        severity=0.0,
+                        graph_seed=int(split_seed),
+                        oracle_labels=False,
+                        scenario_applied=True,
+                        scenario_family="clean",
+                        scenario_method="clean",
+                        severity_param="severity",
+                        graph_view_mode="canonical",
+                        base_graph_path=str(base_p.graph_bin_path),
+                        graph_path=str(base_p.graph_bin_path),
+                        base_stats=base_stats,
+                        variant_stats=base_stats,
+                        scenario_info={},
+                    ),
                 )
 
                 for scenario_cfg in cfg["scenarios"]:
@@ -217,11 +246,36 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                                     **var_stats,
                                 },
                             )
+                            append_variant_audit_row(
+                                variant_audit_tmp_path,
+                                build_variant_audit_row(
+                                    experiment_name=experiment_name,
+                                    dataset_id=dataset_id,
+                                    split_id=split_id,
+                                    scenario_id=scenario_id,
+                                    severity=float(severity),
+                                    graph_seed=int(graph_seed),
+                                    oracle_labels=oracle_labels,
+                                    scenario_applied=bool(applied),
+                                    scenario_family=str(scenario_cfg.get("family", "")),
+                                    scenario_method=str(spec.method),
+                                    severity_param=str(spec.severity_param),
+                                    graph_view_mode=graph_view_mode,
+                                    base_graph_path=str(base_p.graph_bin_path),
+                                    graph_path=str(graph_path_for_row),
+                                    base_stats=base_stats,
+                                    variant_stats=var_stats,
+                                    scenario_info=info,
+                                ),
+                            )
 
         variants_tmp_path.replace(paths.variants_csv_path)
+        variant_audit_tmp_path.replace(paths.variant_audit_csv_path)
     finally:
         if variants_tmp_path.exists():
             variants_tmp_path.unlink()
+        if variant_audit_tmp_path.exists():
+            variant_audit_tmp_path.unlink()
 
 
 def main(argv: list[str] | None = None) -> int:
