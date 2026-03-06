@@ -23,13 +23,12 @@ def _default_out_dir(cfg: dict, config_path: Path) -> Path:
     return Path("runs") / cfg["experiment_name"]
 
 
-def _make_base_graph(cfg: dict, dataset_cfg: dict, split_cfg: dict, *, out_dir: Path, force_reload: bool):
+def _make_source_graph(cfg: dict, dataset_cfg: dict, split_cfg: dict, *, out_dir: Path, force_reload: bool):
     from .data import (
         ensure_feature_dtype,
         ensure_label_dtype,
         ensure_masks,
         load_dgl_fraud_dataset,
-        to_canonical_graph,
     )
 
     dataset_id = dataset_cfg["dataset_id"]
@@ -49,10 +48,26 @@ def _make_base_graph(cfg: dict, dataset_cfg: dict, split_cfg: dict, *, out_dir: 
 
     # Overwrite masks so we have full control.
     ensure_masks(g, train_size=train_size, val_size=val_size, split_seed=split_seed)
+    return g
 
+
+def _to_canonical_graph(graph, *, canonical_view: str):
+    from .data import to_canonical_graph
+
+    return to_canonical_graph(graph, canonical_view)
+
+
+def _make_base_graph(cfg: dict, dataset_cfg: dict, split_cfg: dict, *, out_dir: Path, force_reload: bool):
+    source_graph = _make_source_graph(cfg, dataset_cfg, split_cfg, out_dir=out_dir, force_reload=force_reload)
     canonical = cfg["graph_representation"]["canonical_view"]
-    g_can = to_canonical_graph(g, canonical)
-    return g_can
+    return _to_canonical_graph(source_graph, canonical_view=canonical)
+
+
+def _scenario_graph_view_mode(scenario_cfg: dict[str, object]) -> str:
+    mode = str(scenario_cfg.get("graph_view_mode", "canonical") or "canonical").strip().lower()
+    if mode in {"heterograph_aware_generation", "heterograph-aware-generation", "heterograph"}:
+        return "heterograph_aware_generation"
+    return "canonical"
 
 
 def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -> None:
@@ -87,7 +102,9 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                 split_seed = int(split_cfg["split_seed"])
 
                 print(f"[graphs] dataset={dataset_id} split={split_id} loading source={source_name}")
-                g_base = _make_base_graph(cfg, dataset_cfg, split_cfg, out_dir=paths.out_dir, force_reload=force_reload)
+                g_source = _make_source_graph(cfg, dataset_cfg, split_cfg, out_dir=paths.out_dir, force_reload=force_reload)
+                canonical_view = cfg["graph_representation"]["canonical_view"]
+                g_base = _to_canonical_graph(g_source, canonical_view=canonical_view)
                 base_p = base_graph_path(paths.graphs_dir, dataset_id, split_id)
 
                 base_meta = {
@@ -97,7 +114,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                     "split_seed": split_seed,
                     "train_size": float(split_cfg["train_size"]),
                     "val_size": float(split_cfg["val_size"]),
-                    "canonical_view": cfg["graph_representation"]["canonical_view"],
+                    "canonical_view": canonical_view,
                     "created_unix": time.time(),
                 }
                 save_graph(base_p, g_base, base_meta, force=force)
@@ -128,6 +145,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                     oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
                     severity_values = scenario_cfg["severity_values"]
                     scenario_params = {k: v for k, v in scenario_cfg.items() if k not in {"severity_values"}}
+                    graph_view_mode = _scenario_graph_view_mode(scenario_cfg)
 
                     for severity in severity_values:
                         for graph_seed in graph_seeds:
@@ -145,7 +163,19 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                                 paths.graphs_dir, dataset_id, split_id, scenario_id, float(severity), int(graph_seed)
                             )
 
-                            g_var, applied, info = apply_scenario(g_base, spec)
+                            if graph_view_mode == "heterograph_aware_generation":
+                                g_var_input = g_source
+                            else:
+                                g_var_input = g_base
+
+                            g_var_candidate, applied, info = apply_scenario(g_var_input, spec)
+                            if applied:
+                                if graph_view_mode == "heterograph_aware_generation":
+                                    g_var = _to_canonical_graph(g_var_candidate, canonical_view=canonical_view)
+                                else:
+                                    g_var = g_var_candidate
+                            else:
+                                g_var = g_base
 
                             var_meta = {
                                 **base_meta,
@@ -157,6 +187,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                                 "scenario_applied": bool(applied),
                                 "scenario_method": spec.method,
                                 "scenario_params": scenario_params,
+                                "scenario_graph_view_mode": graph_view_mode,
                                 "scenario_info": info,
                             }
 

@@ -172,7 +172,11 @@ class MatrixProtocolDispatchTests(unittest.TestCase):
     def test_matrix_stage_runs_shift_stage_for_clean_train_protocol(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir)
-            (out_dir / "graph_variants.csv").write_text("dataset_id,split_id\n", encoding="utf-8")
+            clean_path = out_dir / "graphs" / "clean.bin"
+            _write_variant_csv(
+                out_dir / "graph_variants.csv",
+                rows=[_variant_row(graph_path=str(clean_path), base_graph_path=str(clean_path), scenario_id="clean")],
+            )
             cfg = {
                 "seeds": {"training_seeds": [0]},
                 "models": [{"model_id": "mlp"}],

@@ -157,12 +157,80 @@ class RunModelsCliTests(unittest.TestCase):
             stale_manifest = out_dir / "graph_variants.csv"
             _write_variant_csv(stale_manifest)
 
-            with mock.patch("benchmark.run._make_base_graph", side_effect=RuntimeError("boom")):
+            with mock.patch("benchmark.run._make_source_graph", side_effect=RuntimeError("boom")):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
                     _graphs_only(cfg, out_dir=out_dir, force=False, force_reload=False)
 
             self.assertFalse(stale_manifest.exists())
             self.assertFalse((out_dir / "graph_variants.csv.tmp").exists())
+
+    def test_graphs_only_uses_source_graph_for_heterograph_aware_generation(self) -> None:
+        cfg = {
+            "experiment_name": "exp",
+            "graph_representation": {"canonical_view": "homogeneous"},
+            "seeds": {"training_seeds": [7], "graph_seeds": [11]},
+            "datasets": [{"dataset_id": "yelpchi", "source_name": "yelp"}],
+            "data_splits": [
+                {
+                    "split_id": "split_0",
+                    "split_seed": 13,
+                    "train_size": 0.6,
+                    "val_size": 0.2,
+                }
+            ],
+            "scenarios": [
+                {
+                    "scenario_id": "camouflage_relation_oracle",
+                    "family": "camouflage_relation",
+                    "method": "add_relation_camouflage_edges",
+                    "oracle_labels": True,
+                    "severity_param": "p_cam_rel",
+                    "severity_values": [0.5],
+                    "graph_view_mode": "heterograph_aware_generation",
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            source_graph = object()
+            base_graph = object()
+            perturbed_source = object()
+            perturbed_canonical = object()
+
+            def fake_to_canonical(graph, *, canonical_view: str):
+                self.assertEqual(canonical_view, "homogeneous")
+                if graph is source_graph:
+                    return base_graph
+                if graph is perturbed_source:
+                    return perturbed_canonical
+                raise AssertionError("unexpected graph passed to canonical conversion")
+
+            with mock.patch("benchmark.run._make_source_graph", return_value=source_graph):
+                with mock.patch("benchmark.run._to_canonical_graph", side_effect=fake_to_canonical) as to_can_mock:
+                    with mock.patch("benchmark.scenarios.apply_scenario", return_value=(perturbed_source, True, {"ok": True})) as apply_mock:
+                        with mock.patch("benchmark.cache.save_graph") as save_graph_mock:
+                            with mock.patch("benchmark.cache.save_graph_ref") as save_ref_mock:
+                                with mock.patch(
+                                    "benchmark.stats.compute_graph_stats",
+                                    return_value={
+                                        "n_nodes": 10,
+                                        "n_edges": 12,
+                                        "mean_in_degree": 1.2,
+                                        "median_in_degree": 1.0,
+                                        "mean_out_degree": 1.2,
+                                        "median_out_degree": 1.0,
+                                        "heterophily_ratio": 0.3,
+                                        "pos_rate": 0.2,
+                                    },
+                                ):
+                                    _graphs_only(cfg, out_dir=out_dir, force=False, force_reload=False)
+
+            apply_mock.assert_called_once()
+            self.assertIs(apply_mock.call_args.args[0], source_graph)
+            self.assertEqual(to_can_mock.call_count, 2)
+            save_graph_mock.assert_called()
+            save_ref_mock.assert_not_called()
 
 
 class StageModelFilterTests(unittest.TestCase):
