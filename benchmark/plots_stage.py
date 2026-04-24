@@ -4,9 +4,9 @@ import csv
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from .config import get_training_seeds
+from .config import get_training_seeds, scenario_oracle_labels
 from .results import PROTOCOL_TRAIN_ON_VARIANT, normalize_protocol
 from .variants import filter_variants, read_variants_csv
 
@@ -42,6 +42,15 @@ class MetricStats:
 
 
 @dataclass(frozen=True)
+class AuditMetricSpec:
+    metric_id: str
+    display_name: str
+    extractor: Callable[[Mapping[str, Any]], float | None]
+    unit: str = ""
+    unit_field: str = ""
+
+
+@dataclass(frozen=True)
 class CompletenessReport:
     total_expected: int
     present_ok: int
@@ -63,6 +72,12 @@ def _safe_float(x: Any) -> float:
         return float(x)
     except Exception:
         return float("nan")
+
+
+def _parse_bool(x: Any) -> bool:
+    if isinstance(x, bool):
+        return bool(x)
+    return str(x).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
 def _read_results_csv(path: Path) -> list[ResultRow]:
@@ -90,6 +105,34 @@ def _read_results_csv(path: Path) -> list[ResultRow]:
                     status=str(r.get("status", "")),
                 )
             )
+    return rows
+
+
+def _read_variant_audit_csv(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"variant_audit.csv not found: {path}")
+
+    rows: list[dict[str, Any]] = []
+    with path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        required = {"dataset_id", "split_id", "scenario_id", "severity", "graph_seed", "oracle_labels", "graph_view_mode"}
+        missing = sorted(required - set(fieldnames))
+        if missing:
+            raise RuntimeError(f"variant_audit.csv is missing required columns: {missing}")
+        for raw in reader:
+            row = dict(raw)
+            row["severity"] = float(raw.get("severity", 0.0) or 0.0)
+            row["graph_seed"] = _safe_int(raw.get("graph_seed", 0))
+            row["oracle_labels"] = _parse_bool(raw.get("oracle_labels", False))
+            row["scenario_applied"] = _parse_bool(raw.get("scenario_applied", True))
+            rows.append(row)
+
+    if not rows:
+        raise RuntimeError(
+            f"No rows found in {path}. Re-run `py -m benchmark.run --stage graphs ...`; "
+            "a previous graphs run may have been interrupted."
+        )
     return rows
 
 
@@ -131,7 +174,7 @@ def _scenario_meta_by_id(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out = {"clean": {"oracle_labels": False, "display_name": "clean"}}
     for scenario_cfg in cfg.get("scenarios", []):
         scenario_id = str(scenario_cfg.get("scenario_id", ""))
-        oracle_labels = bool(scenario_cfg.get("oracle_labels", False))
+        oracle_labels = scenario_oracle_labels(scenario_cfg)
         out[scenario_id] = {
             "oracle_labels": oracle_labels,
             "display_name": scenario_id + (" (oracle)" if oracle_labels else ""),
@@ -253,7 +296,6 @@ def _bootstrap_robustness_stats(
     seed: int = BOOTSTRAP_SEED,
 ) -> tuple[MetricStats, MetricStats]:
     np = _require_numpy()
-    trapz = getattr(np, "trapezoid", np.trapz)
 
     x = np.asarray([float(x) for x in x_values], dtype=np.float64)
     if x.shape[0] < 2:
@@ -274,7 +316,7 @@ def _bootstrap_robustness_stats(
         series.append(vv)
 
     mean_curve = np.asarray([sum(vv) / len(vv) for vv in series], dtype=np.float64)
-    auc_mean = float(trapz(mean_curve, x))
+    auc_mean = float(np.sum((x[1:] - x[:-1]) * (mean_curve[1:] + mean_curve[:-1]) * 0.5))
     avg_mean = float(auc_mean / x_range)
 
     if all(len(vv) == 1 for vv in series):
@@ -292,7 +334,7 @@ def _bootstrap_robustness_stats(
             idx = rng.choice(arr.shape[0], size=arr.shape[0], replace=True)
             sampled_curve.append(float(arr[idx].mean()))
         y = np.asarray(sampled_curve, dtype=np.float64)
-        auc = float(trapz(y, x))
+        auc = float(np.sum((x[1:] - x[:-1]) * (y[1:] + y[:-1]) * 0.5))
         auc_samples.append(auc)
         avg_samples.append(float(auc / x_range))
 
@@ -330,6 +372,454 @@ def _scenario_oracle_labels(scenario_meta: dict[str, dict[str, Any]], scenario_i
 def _scenario_display_name(scenario_meta: dict[str, dict[str, Any]], scenario_id: str) -> str:
     meta = scenario_meta.get(str(scenario_id), {})
     return str(meta.get("display_name", str(scenario_id)))
+
+
+def _variant_join_key(
+    dataset_id: str,
+    split_id: str,
+    scenario_id: str,
+    severity: float,
+    graph_seed: int,
+) -> tuple[str, str, str, float, int]:
+    return (
+        str(dataset_id),
+        str(split_id),
+        str(scenario_id),
+        float(severity),
+        int(graph_seed),
+    )
+
+
+def _variant_join_key_from_variant_row(variant: Any) -> tuple[str, str, str, float, int]:
+    return _variant_join_key(
+        str(getattr(variant, "dataset_id")),
+        str(getattr(variant, "split_id")),
+        str(getattr(variant, "scenario_id")),
+        float(getattr(variant, "severity")),
+        int(getattr(variant, "graph_seed")),
+    )
+
+
+def _variant_join_key_from_result_row(result: ResultRow) -> tuple[str, str, str, float, int]:
+    return _variant_join_key(
+        result.dataset_id,
+        result.split_id,
+        result.scenario_id,
+        result.severity,
+        result.graph_seed,
+    )
+
+
+def _variant_join_key_from_audit_row(audit_row: Mapping[str, Any]) -> tuple[str, str, str, float, int]:
+    return _variant_join_key(
+        str(audit_row.get("dataset_id", "")),
+        str(audit_row.get("split_id", "")),
+        str(audit_row.get("scenario_id", "")),
+        float(audit_row.get("severity", 0.0) or 0.0),
+        _safe_int(audit_row.get("graph_seed", 0)),
+    )
+
+
+def _index_variants_by_key(variants: Sequence[Any]) -> dict[tuple[str, str, str, float, int], Any]:
+    out: dict[tuple[str, str, str, float, int], Any] = {}
+    for variant in variants:
+        key = _variant_join_key_from_variant_row(variant)
+        if key in out:
+            raise RuntimeError(f"Duplicate graph variant key found in graph_variants.csv: {key}")
+        out[key] = variant
+    return out
+
+
+def _index_audit_rows_by_key(audit_rows: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str, str, float, int], dict[str, Any]]:
+    out: dict[tuple[str, str, str, float, int], dict[str, Any]] = {}
+    for audit_row in audit_rows:
+        key = _variant_join_key_from_audit_row(audit_row)
+        if key in out:
+            raise RuntimeError(f"Duplicate audit key found in variant_audit.csv: {key}")
+        out[key] = dict(audit_row)
+    return out
+
+
+def _sample_variant_key_text(keys: Sequence[tuple[str, str, str, float, int]], *, limit: int = 5) -> str:
+    sample = ", ".join(
+        f"{scenario_id}/sev={float(severity):g}/gs={int(graph_seed)}"
+        for _dataset_id, _split_id, scenario_id, severity, graph_seed in keys[: int(limit)]
+    )
+    if len(keys) > int(limit):
+        sample += ", ..."
+    return sample
+
+
+def _require_audit_keys_for_variants(
+    variant_by_key: Mapping[tuple[str, str, str, float, int], Any],
+    audit_by_key: Mapping[tuple[str, str, str, float, int], Mapping[str, Any]],
+) -> None:
+    missing = sorted(key for key in variant_by_key if key not in audit_by_key)
+    if missing:
+        sample = _sample_variant_key_text(missing)
+        raise RuntimeError(f"variant_audit.csv is missing rows for graph variants: {sample}")
+
+
+def _protocols_by_dataset_split(rows: Sequence[ResultRow], *, model_ids: Sequence[str]) -> dict[tuple[str, str], set[str]]:
+    allowed_model_ids = set(model_ids)
+    out: dict[tuple[str, str], set[str]] = {}
+    for row in rows:
+        if allowed_model_ids and row.model_id not in allowed_model_ids:
+            continue
+        if row.status not in {"ok", "error"}:
+            continue
+        key = (str(row.dataset_id), str(row.split_id))
+        out.setdefault(key, set()).add(normalize_protocol(row.protocol))
+    return out
+
+
+def _finite_float_or_none(value: Any) -> float | None:
+    out = _safe_float(value)
+    if not math.isfinite(out):
+        return None
+    return float(out)
+
+
+def _audit_field_metric(metric_id: str, display_name: str, *, unit: str = "") -> AuditMetricSpec:
+    return AuditMetricSpec(
+        metric_id=metric_id,
+        display_name=display_name,
+        extractor=lambda row, field=metric_id: _finite_float_or_none(row.get(field, "")),
+        unit=unit,
+    )
+
+
+def _audit_delta_metric(
+    metric_id: str,
+    display_name: str,
+    *,
+    before_key: str,
+    after_key: str,
+    unit: str = "",
+) -> AuditMetricSpec:
+    return AuditMetricSpec(
+        metric_id=metric_id,
+        display_name=display_name,
+        extractor=lambda row, before_key=before_key, after_key=after_key: (
+            None
+            if _finite_float_or_none(row.get(before_key, "")) is None
+            or _finite_float_or_none(row.get(after_key, "")) is None
+            else float(_finite_float_or_none(row.get(after_key, "")) - _finite_float_or_none(row.get(before_key, "")))
+        ),
+        unit=unit,
+    )
+
+
+def _selected_audit_metric_specs(cfg: dict[str, Any]) -> list[AuditMetricSpec]:
+    raw_metric_specs: dict[str, AuditMetricSpec] = {
+        "requested_change": AuditMetricSpec(
+            metric_id="requested_change",
+            display_name="Requested change",
+            extractor=lambda row: _finite_float_or_none(row.get("requested_change", "")),
+            unit_field="requested_change_unit",
+        ),
+        "realized_change": AuditMetricSpec(
+            metric_id="realized_change",
+            display_name="Realized change",
+            extractor=lambda row: _finite_float_or_none(row.get("realized_change", "")),
+            unit_field="realized_change_unit",
+        ),
+        "heterophily_ratio_before": _audit_field_metric("heterophily_ratio_before", "Heterophily ratio before"),
+        "heterophily_ratio_after": _audit_field_metric("heterophily_ratio_after", "Heterophily ratio after"),
+        "mean_cosine_to_sampled_normal_before": _audit_field_metric(
+            "mean_cosine_to_sampled_normal_before",
+            "Cosine to sampled normal before",
+        ),
+        "mean_cosine_to_sampled_normal_after": _audit_field_metric(
+            "mean_cosine_to_sampled_normal_after",
+            "Cosine to sampled normal after",
+        ),
+        "fraud_to_normal_neighbor_ratio_before": _audit_field_metric(
+            "fraud_to_normal_neighbor_ratio_before",
+            "Fraud-to-normal neighbor ratio before",
+        ),
+        "fraud_to_normal_neighbor_ratio_after": _audit_field_metric(
+            "fraud_to_normal_neighbor_ratio_after",
+            "Fraud-to-normal neighbor ratio after",
+        ),
+        "n_added_edge_pairs_actual": _audit_field_metric(
+            "n_added_edge_pairs_actual",
+            "Added edge pairs",
+            unit="edges",
+        ),
+        "n_rewired_edges_actual": _audit_field_metric(
+            "n_rewired_edges_actual",
+            "Rewired edges",
+            unit="edges",
+        ),
+    }
+    derived_metric_specs: list[AuditMetricSpec] = [
+        _audit_delta_metric(
+            "heterophily_ratio_shift",
+            "Heterophily ratio shift",
+            before_key="heterophily_ratio_before",
+            after_key="heterophily_ratio_after",
+        ),
+        _audit_delta_metric(
+            "mean_cosine_to_sampled_normal_shift",
+            "Cosine to sampled normal shift",
+            before_key="mean_cosine_to_sampled_normal_before",
+            after_key="mean_cosine_to_sampled_normal_after",
+        ),
+        _audit_delta_metric(
+            "fraud_to_normal_neighbor_ratio_shift",
+            "Fraud-to-normal neighbor ratio shift",
+            before_key="fraud_to_normal_neighbor_ratio_before",
+            after_key="fraud_to_normal_neighbor_ratio_after",
+        ),
+    ]
+
+    configured_metrics = cfg.get("evaluation", {}).get("audit_metrics", [])
+    configured_metric_ids = {str(metric_id) for metric_id in configured_metrics if str(metric_id)}
+
+    ordered_specs: list[AuditMetricSpec] = [
+        raw_metric_specs["requested_change"],
+        raw_metric_specs["realized_change"],
+        raw_metric_specs["heterophily_ratio_after"],
+        raw_metric_specs["n_rewired_edges_actual"],
+        raw_metric_specs["mean_cosine_to_sampled_normal_after"],
+        raw_metric_specs["fraud_to_normal_neighbor_ratio_after"],
+        raw_metric_specs["n_added_edge_pairs_actual"],
+    ]
+
+    for metric_id in sorted(configured_metric_ids):
+        spec = raw_metric_specs.get(metric_id)
+        if spec is not None:
+            ordered_specs.append(spec)
+
+    if {"heterophily_ratio_before", "heterophily_ratio_after"} & configured_metric_ids:
+        ordered_specs.append(derived_metric_specs[0])
+    if {
+        "mean_cosine_to_sampled_normal_before",
+        "mean_cosine_to_sampled_normal_after",
+    } & configured_metric_ids:
+        ordered_specs.append(derived_metric_specs[1])
+    if {
+        "fraud_to_normal_neighbor_ratio_before",
+        "fraud_to_normal_neighbor_ratio_after",
+    } & configured_metric_ids:
+        ordered_specs.append(derived_metric_specs[2])
+
+    if not configured_metric_ids:
+        ordered_specs.extend(derived_metric_specs)
+
+    seen: set[str] = set()
+    out: list[AuditMetricSpec] = []
+    for spec in ordered_specs:
+        if spec.metric_id in seen:
+            continue
+        seen.add(spec.metric_id)
+        out.append(spec)
+    return out
+
+
+def _build_performance_audit_join_rows(
+    rows: Sequence[ResultRow],
+    *,
+    model_ids: Sequence[str],
+    variant_by_key: Mapping[tuple[str, str, str, float, int], Any],
+    audit_by_key: Mapping[tuple[str, str, str, float, int], Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    allowed_model_ids = set(model_ids)
+    joined_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if allowed_model_ids and row.model_id not in allowed_model_ids:
+            continue
+        key = _variant_join_key_from_result_row(row)
+        if key not in variant_by_key:
+            continue
+        audit_row = audit_by_key.get(key)
+        if audit_row is None:
+            raise RuntimeError(f"variant_audit.csv is missing a join row for results key: {key}")
+        variant = variant_by_key[key]
+        joined_rows.append(
+            {
+                "experiment_name": row.experiment_name,
+                "dataset_id": row.dataset_id,
+                "split_id": row.split_id,
+                "scenario_id": row.scenario_id,
+                "severity": float(row.severity),
+                "graph_seed": int(row.graph_seed),
+                "training_seed": int(row.training_seed),
+                "model_id": row.model_id,
+                "protocol": normalize_protocol(row.protocol),
+                "status": row.status,
+                "oracle_labels": bool(audit_row.get("oracle_labels", False)),
+                "scenario_applied": bool(getattr(variant, "scenario_applied")),
+                "graph_view_mode": str(audit_row.get("graph_view_mode", "")),
+                "scenario_family": str(audit_row.get("scenario_family", "")),
+                "scenario_method": str(audit_row.get("scenario_method", "")),
+                "severity_param": str(audit_row.get("severity_param", "")),
+                "requested_severity": _finite_float_or_none(audit_row.get("requested_severity", "")),
+                "requested_change": _finite_float_or_none(audit_row.get("requested_change", "")),
+                "requested_change_unit": str(audit_row.get("requested_change_unit", "")),
+                "realized_change": _finite_float_or_none(audit_row.get("realized_change", "")),
+                "realized_change_unit": str(audit_row.get("realized_change_unit", "")),
+                "roc_auc": row.roc_auc,
+                "average_precision": row.average_precision,
+                "f1_macro": row.f1_macro,
+                "base_graph_path": str(getattr(variant, "base_graph_path")),
+                "graph_path": str(getattr(variant, "graph_path")),
+                "variant_n_nodes": int(getattr(variant, "n_nodes")),
+                "variant_n_edges": int(getattr(variant, "n_edges")),
+                "variant_heterophily_ratio": getattr(variant, "heterophily_ratio"),
+                "variant_pos_rate": getattr(variant, "pos_rate"),
+                "heterophily_ratio_before": _finite_float_or_none(audit_row.get("heterophily_ratio_before", "")),
+                "heterophily_ratio_after": _finite_float_or_none(audit_row.get("heterophily_ratio_after", "")),
+                "mean_cosine_to_sampled_normal_before": _finite_float_or_none(
+                    audit_row.get("mean_cosine_to_sampled_normal_before", "")
+                ),
+                "mean_cosine_to_sampled_normal_after": _finite_float_or_none(
+                    audit_row.get("mean_cosine_to_sampled_normal_after", "")
+                ),
+                "fraud_to_normal_neighbor_ratio_before": _finite_float_or_none(
+                    audit_row.get("fraud_to_normal_neighbor_ratio_before", "")
+                ),
+                "fraud_to_normal_neighbor_ratio_after": _finite_float_or_none(
+                    audit_row.get("fraud_to_normal_neighbor_ratio_after", "")
+                ),
+                "n_added_edge_pairs_actual": _finite_float_or_none(audit_row.get("n_added_edge_pairs_actual", "")),
+                "n_rewired_edges_actual": _finite_float_or_none(audit_row.get("n_rewired_edges_actual", "")),
+            }
+        )
+    return joined_rows
+
+
+def _build_audit_summary_rows(
+    audit_rows: Sequence[Mapping[str, Any]],
+    *,
+    protocols_by_dataset_split: Mapping[tuple[str, str], set[str]],
+    metric_specs: Sequence[AuditMetricSpec],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, float, str, str, str, str, bool, str, str], list[float]] = {}
+    for audit_row in audit_rows:
+        dataset_id = str(audit_row.get("dataset_id", ""))
+        split_id = str(audit_row.get("split_id", ""))
+        scenario_id = str(audit_row.get("scenario_id", ""))
+        severity = float(audit_row.get("severity", 0.0) or 0.0)
+        oracle_labels = bool(audit_row.get("oracle_labels", False))
+        graph_view_mode = str(audit_row.get("graph_view_mode", ""))
+        source = "clean" if scenario_id == "clean" else "scenario"
+        protocols = sorted(protocols_by_dataset_split.get((dataset_id, split_id), {PROTOCOL_TRAIN_ON_VARIANT}))
+        for protocol in protocols:
+            for spec in metric_specs:
+                value = spec.extractor(audit_row)
+                if value is None or not math.isfinite(float(value)):
+                    continue
+                metric_unit = str(audit_row.get(spec.unit_field, "")) if spec.unit_field else str(spec.unit)
+                key = (
+                    dataset_id,
+                    split_id,
+                    scenario_id,
+                    severity,
+                    protocol,
+                    spec.metric_id,
+                    spec.display_name,
+                    metric_unit,
+                    oracle_labels,
+                    graph_view_mode,
+                    source,
+                )
+                groups.setdefault(key, []).append(float(value))
+
+    out: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        (
+            dataset_id,
+            split_id,
+            scenario_id,
+            severity,
+            protocol,
+            metric_id,
+            metric_label,
+            metric_unit,
+            oracle_labels,
+            graph_view_mode,
+            source,
+        ) = key
+        stats = _aggregate_metric_stats(groups[key], ci=ci)
+        out.append(
+            {
+                "dataset_id": dataset_id,
+                "split_id": split_id,
+                "scenario_id": scenario_id,
+                "severity": float(severity),
+                "protocol": protocol,
+                "audit_metric": metric_id,
+                "audit_metric_label": metric_label,
+                "audit_metric_unit": metric_unit,
+                "oracle_labels": bool(oracle_labels),
+                "graph_view_mode": graph_view_mode,
+                "mean": stats.mean,
+                "std": stats.std,
+                "ci_lower": stats.ci_lower,
+                "ci_upper": stats.ci_upper,
+                "n_graphs": stats.n,
+                "source": source,
+            }
+        )
+    return out
+
+
+def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, float, str, str, str, str, bool, str, str], list[dict[str, Any]]] = {}
+    for row in audit_rows:
+        key = (
+            str(row.get("dataset_id", "")),
+            str(row.get("scenario_id", "")),
+            float(row.get("severity", 0.0) or 0.0),
+            str(row.get("protocol", "")),
+            str(row.get("audit_metric", "")),
+            str(row.get("audit_metric_label", "")),
+            str(row.get("audit_metric_unit", "")),
+            bool(row.get("oracle_labels", False)),
+            str(row.get("graph_view_mode", "")),
+            str(row.get("source", "")),
+        )
+        groups.setdefault(key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        (
+            dataset_id,
+            scenario_id,
+            severity,
+            protocol,
+            metric_id,
+            metric_label,
+            metric_unit,
+            oracle_labels,
+            graph_view_mode,
+            source,
+        ) = key
+        split_means = [_safe_float(row.get("mean", "")) for row in groups[key]]
+        stats = _aggregate_metric_stats(split_means, ci=ci)
+        out.append(
+            {
+                "dataset_id": dataset_id,
+                "scenario_id": scenario_id,
+                "severity": float(severity),
+                "protocol": protocol,
+                "audit_metric": metric_id,
+                "audit_metric_label": metric_label,
+                "audit_metric_unit": metric_unit,
+                "oracle_labels": bool(oracle_labels),
+                "graph_view_mode": graph_view_mode,
+                "mean": stats.mean,
+                "std": stats.std,
+                "ci_lower": stats.ci_lower,
+                "ci_upper": stats.ci_upper,
+                "n_splits": stats.n,
+                "source": source,
+            }
+        )
+    return out
 
 
 def _format_run_key(key: tuple[str, str, str, float, int, int, str, str]) -> str:
@@ -727,6 +1217,75 @@ def _plot_summary_rows(
     plt.close(fig)
 
 
+def _plot_audit_rows(
+    audit_rows: Sequence[dict[str, Any]],
+    *,
+    out_group_dir: Path,
+    dataset_id: str,
+    split_label: str,
+    protocol: str,
+    scenario_id: str,
+    scenario_display_name: str,
+    oracle_labels: bool,
+    audit_metric: str,
+    audit_metric_label: str,
+    audit_metric_unit: str,
+    severity_values: Sequence[float],
+    ci: bool,
+    plt: Any,
+) -> None:
+    fig, ax = plt.subplots(figsize=(7.0, 4.2), dpi=200)
+    title = f"{dataset_id}/{split_label} [{protocol}] - {scenario_display_name}: {audit_metric_label} vs severity"
+    ylabel = str(audit_metric_label)
+    if audit_metric_unit and audit_metric_unit != "none":
+        ylabel = f"{ylabel} [{audit_metric_unit}]"
+
+    points: list[MetricStats] = []
+    for severity in severity_values:
+        found = None
+        for row in audit_rows:
+            if (
+                str(row.get("audit_metric", "")) == str(audit_metric)
+                and float(row.get("severity", 0.0) or 0.0) == float(severity)
+            ):
+                found = row
+                break
+        if found is None:
+            points.append(MetricStats(float("nan"), float("nan"), 0, float("nan"), float("nan")))
+            continue
+        points.append(
+            MetricStats(
+                mean=_safe_float(found.get("mean", "")),
+                std=_safe_float(found.get("std", "")),
+                n=_safe_int(found.get("n_graphs", found.get("n_splits", 0))),
+                ci_lower=_safe_float(found.get("ci_lower", "")),
+                ci_upper=_safe_float(found.get("ci_upper", "")),
+            )
+        )
+
+    ax.errorbar(
+        severity_values,
+        [stats.mean for stats in points],
+        yerr=_yerr_from_stats(points, use_ci=bool(ci)),
+        color="#444444",
+        marker="o",
+        linewidth=1.8,
+        markersize=4,
+        capsize=3,
+    )
+    ax.set_title(title)
+    ax.set_xlabel("Severity")
+    ax.set_ylabel(ylabel)
+    ax.set_xticks(list(severity_values))
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+
+    out_group_dir.mkdir(parents=True, exist_ok=True)
+    out_png = out_group_dir / f"audit__{scenario_id}__{audit_metric}.png"
+    fig.savefig(out_png)
+    plt.close(fig)
+
+
 def run_plots_stage(
     cfg: dict[str, Any],
     *,
@@ -739,8 +1298,19 @@ def run_plots_stage(
 ) -> None:
     out_dir = out_dir.resolve()
     results_csv = out_dir / "results.csv"
+    variants_csv = out_dir / "graph_variants.csv"
+    variant_audit_csv = out_dir / "variant_audit.csv"
     rows = _read_results_csv(results_csv)
     ok = [r for r in rows if r.status == "ok"]
+    variants = filter_variants(
+        read_variants_csv(variants_csv),
+        include_noop=bool(include_noop),
+        only_clean=bool(only_clean),
+        max_variants=max_variants,
+    )
+    variant_by_key = _index_variants_by_key(variants)
+    audit_by_key = _index_audit_rows_by_key(_read_variant_audit_csv(variant_audit_csv))
+    _require_audit_keys_for_variants(variant_by_key, audit_by_key)
 
     plots_dir = out_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -769,6 +1339,21 @@ def run_plots_stage(
     severity_grid = _severity_grid_from_config(cfg)
     model_ids = [m for m in _model_ids_from_config(cfg) if m in {"mlp", "sage", "pmp", "secgfd"}]
     scenario_meta = _scenario_meta_by_id(cfg)
+    protocols_by_dataset_split = _protocols_by_dataset_split(rows, model_ids=model_ids)
+    audit_metric_specs = _selected_audit_metric_specs(cfg)
+    filtered_audit_rows = [audit_by_key[key] for key in variant_by_key]
+    performance_audit_join_rows = _build_performance_audit_join_rows(
+        rows,
+        model_ids=model_ids,
+        variant_by_key=variant_by_key,
+        audit_by_key=audit_by_key,
+    )
+    audit_summary_rows = _build_audit_summary_rows(
+        filtered_audit_rows,
+        protocols_by_dataset_split=protocols_by_dataset_split,
+        metric_specs=audit_metric_specs,
+        ci=ci,
+    )
 
     metrics = [
         ("roc_auc", "ROC-AUC"),
@@ -1045,10 +1630,77 @@ def run_plots_stage(
         ],
         robust_rows,
     )
+    _write_csv(
+        plots_dir / "performance_audit_join.csv",
+        [
+            "experiment_name",
+            "dataset_id",
+            "split_id",
+            "scenario_id",
+            "severity",
+            "graph_seed",
+            "training_seed",
+            "model_id",
+            "protocol",
+            "status",
+            "oracle_labels",
+            "scenario_applied",
+            "graph_view_mode",
+            "scenario_family",
+            "scenario_method",
+            "severity_param",
+            "requested_severity",
+            "requested_change",
+            "requested_change_unit",
+            "realized_change",
+            "realized_change_unit",
+            "roc_auc",
+            "average_precision",
+            "f1_macro",
+            "base_graph_path",
+            "graph_path",
+            "variant_n_nodes",
+            "variant_n_edges",
+            "variant_heterophily_ratio",
+            "variant_pos_rate",
+            "heterophily_ratio_before",
+            "heterophily_ratio_after",
+            "mean_cosine_to_sampled_normal_before",
+            "mean_cosine_to_sampled_normal_after",
+            "fraud_to_normal_neighbor_ratio_before",
+            "fraud_to_normal_neighbor_ratio_after",
+            "n_added_edge_pairs_actual",
+            "n_rewired_edges_actual",
+        ],
+        performance_audit_join_rows,
+    )
+    _write_csv(
+        plots_dir / "audit_curves.csv",
+        [
+            "dataset_id",
+            "split_id",
+            "scenario_id",
+            "severity",
+            "protocol",
+            "audit_metric",
+            "audit_metric_label",
+            "audit_metric_unit",
+            "oracle_labels",
+            "graph_view_mode",
+            "mean",
+            "std",
+            "ci_lower",
+            "ci_upper",
+            "n_graphs",
+            "source",
+        ],
+        audit_summary_rows,
+    )
 
     cross_split_summary_rows = _build_cross_split_summary_rows(summary_rows, ci=ci)
     cross_split_drop_rows = _build_cross_split_drop_rows(drop_rows, ci=ci)
     cross_split_robust_rows = _build_cross_split_robust_rows(robust_rows, ci=ci)
+    cross_split_audit_rows = _build_cross_split_audit_rows(audit_summary_rows, ci=ci)
 
     _write_csv(
         plots_dir / "summary_curves_cross_split.csv",
@@ -1116,6 +1768,27 @@ def run_plots_stage(
         ],
         cross_split_robust_rows,
     )
+    _write_csv(
+        plots_dir / "audit_curves_cross_split.csv",
+        [
+            "dataset_id",
+            "scenario_id",
+            "severity",
+            "protocol",
+            "audit_metric",
+            "audit_metric_label",
+            "audit_metric_unit",
+            "oracle_labels",
+            "graph_view_mode",
+            "mean",
+            "std",
+            "ci_lower",
+            "ci_upper",
+            "n_splits",
+            "source",
+        ],
+        cross_split_audit_rows,
+    )
 
     split_counts_by_dataset_protocol: dict[tuple[str, str], set[str]] = {}
     for row in summary_rows:
@@ -1159,6 +1832,88 @@ def run_plots_stage(
                     model_ids=model_ids,
                     severity_values=sevs_plot,
                     colors=colors,
+                    ci=ci,
+                    plt=plt,
+                )
+
+    for (dataset_id, split_id), protocols in sorted(protocols_by_dataset_split.items()):
+        for protocol in sorted(protocols):
+            out_group_dir = plots_dir / protocol / dataset_id / split_id
+            dataset_rows = [
+                row
+                for row in audit_summary_rows
+                if str(row.get("dataset_id", "")) == dataset_id
+                and str(row.get("split_id", "")) == split_id
+                and str(row.get("protocol", "")) == protocol
+            ]
+            for scenario_cfg in cfg.get("scenarios", []):
+                scenario_id = str(scenario_cfg.get("scenario_id", ""))
+                oracle_labels = _scenario_oracle_labels(scenario_meta, scenario_id)
+                scenario_display_name = _scenario_display_name(scenario_meta, scenario_id)
+                scenario_rows = [row for row in dataset_rows if str(row.get("scenario_id", "")) == scenario_id]
+                if not scenario_rows:
+                    continue
+                for audit_metric in sorted({str(row.get("audit_metric", "")) for row in scenario_rows}):
+                    metric_rows = [row for row in scenario_rows if str(row.get("audit_metric", "")) == audit_metric]
+                    if not metric_rows:
+                        continue
+                    severity_values = sorted({float(row.get("severity", 0.0) or 0.0) for row in metric_rows})
+                    _plot_audit_rows(
+                        metric_rows,
+                        out_group_dir=out_group_dir,
+                        dataset_id=dataset_id,
+                        split_label=split_id,
+                        protocol=protocol,
+                        scenario_id=scenario_id,
+                        scenario_display_name=scenario_display_name,
+                        oracle_labels=oracle_labels,
+                        audit_metric=audit_metric,
+                        audit_metric_label=str(metric_rows[0].get("audit_metric_label", audit_metric)),
+                        audit_metric_unit=str(metric_rows[0].get("audit_metric_unit", "")),
+                        severity_values=severity_values,
+                        ci=ci,
+                        plt=plt,
+                    )
+
+    split_counts_by_dataset_protocol_audit: dict[tuple[str, str], set[str]] = {}
+    for row in audit_summary_rows:
+        key = (str(row.get("dataset_id", "")), str(row.get("protocol", "")))
+        split_counts_by_dataset_protocol_audit.setdefault(key, set()).add(str(row.get("split_id", "")))
+
+    for dataset_id, protocol in sorted(split_counts_by_dataset_protocol_audit):
+        if len(split_counts_by_dataset_protocol_audit[(dataset_id, protocol)]) <= 1:
+            continue
+        dataset_rows = [
+            row
+            for row in cross_split_audit_rows
+            if str(row.get("dataset_id", "")) == dataset_id and str(row.get("protocol", "")) == protocol
+        ]
+        out_group_dir = plots_dir / protocol / dataset_id / "across_splits"
+        for scenario_cfg in cfg.get("scenarios", []):
+            scenario_id = str(scenario_cfg.get("scenario_id", ""))
+            oracle_labels = _scenario_oracle_labels(scenario_meta, scenario_id)
+            scenario_display_name = _scenario_display_name(scenario_meta, scenario_id)
+            scenario_rows = [row for row in dataset_rows if str(row.get("scenario_id", "")) == scenario_id]
+            if not scenario_rows:
+                continue
+            for audit_metric in sorted({str(row.get("audit_metric", "")) for row in scenario_rows}):
+                metric_rows = [row for row in scenario_rows if str(row.get("audit_metric", "")) == audit_metric]
+                if not metric_rows:
+                    continue
+                severity_values = sorted({float(row.get("severity", 0.0) or 0.0) for row in metric_rows})
+                _plot_audit_rows(
+                    metric_rows,
+                    out_group_dir=out_group_dir,
+                    dataset_id=dataset_id,
+                    split_label="across_splits",
+                    protocol=protocol,
+                    scenario_id=scenario_id,
+                    scenario_display_name=scenario_display_name,
+                    oracle_labels=oracle_labels,
+                    audit_metric=audit_metric,
+                    audit_metric_label=str(metric_rows[0].get("audit_metric_label", audit_metric)),
+                    audit_metric_unit=str(metric_rows[0].get("audit_metric_unit", "")),
+                    severity_values=severity_values,
                     ci=ci,
                     plt=plt,
                 )

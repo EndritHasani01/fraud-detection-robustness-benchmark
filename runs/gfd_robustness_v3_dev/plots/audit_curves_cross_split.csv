@@ -1,0 +1,40 @@
+dataset_id,scenario_id,severity,protocol,audit_metric,audit_metric_label,audit_metric_unit,oracle_labels,graph_view_mode,mean,std,ci_lower,ci_upper,n_splits,source
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,heterophily_ratio_after,Heterophily ratio after,,True,canonical,0.2268800139427185,0.0,0.2268800139427185,0.2268800139427185,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,heterophily_ratio_before,Heterophily ratio before,,True,canonical,0.2268800139427185,0.0,0.2268800139427185,0.2268800139427185,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,heterophily_ratio_shift,Heterophily ratio shift,,True,canonical,0.0,0.0,0.0,0.0,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,mean_cosine_to_sampled_normal_after,Cosine to sampled normal after,,True,canonical,1.0,0.0,1.0,1.0,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,mean_cosine_to_sampled_normal_before,Cosine to sampled normal before,,True,canonical,0.838870108127594,0.0,0.838870108127594,0.838870108127594,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,mean_cosine_to_sampled_normal_shift,Cosine to sampled normal shift,,True,canonical,0.161129891872406,0.0,0.161129891872406,0.161129891872406,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,realized_change,Realized change,nodes_changed,True,canonical,2003.0,0.0,2003.0,2003.0,1,scenario
+yelpchi,camouflage_feature_oracle,0.3,train_on_variant,requested_change,Requested change,nodes_selected,True,canonical,2003.0,0.0,2003.0,2003.0,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,fraud_to_normal_neighbor_ratio_after,Fraud-to-normal neighbor ratio after,,True,heterograph_aware_generation,0.8187234829724134,0.0,0.8187234829724134,0.8187234829724134,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,fraud_to_normal_neighbor_ratio_before,Fraud-to-normal neighbor ratio before,,True,heterograph_aware_generation,0.8116214780330112,0.0,0.8116214780330112,0.8116214780330112,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,fraud_to_normal_neighbor_ratio_shift,Fraud-to-normal neighbor ratio shift,,True,heterograph_aware_generation,0.007102004939402162,0.0,0.007102004939402162,0.007102004939402162,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,heterophily_ratio_after,Heterophily ratio after,,True,heterograph_aware_generation,0.22732102870941162,0.0,0.22732102870941162,0.22732102870941162,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,heterophily_ratio_before,Heterophily ratio before,,True,heterograph_aware_generation,0.2268800139427185,0.0,0.2268800139427185,0.2268800139427185,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,heterophily_ratio_shift,Heterophily ratio shift,,True,heterograph_aware_generation,0.00044101476669311523,0.0,0.00044101476669311523,0.00044101476669311523,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,realized_change,Realized change,nodes_changed,True,heterograph_aware_generation,2003.0,0.0,2003.0,2003.0,1,scenario
+yelpchi,camouflage_relation_oracle,0.3,train_on_variant,requested_change,Requested change,nodes_selected,True,heterograph_aware_generation,2003.0,0.0,2003.0,2003.0,1,scenario
+yelpchi,clean,0.0,train_on_variant,heterophily_ratio_after,Heterophily ratio after,,False,canonical,0.2268800139427185,0.0,0.2268800139427185,0.2268800139427185,1,clean
+yelpchi,clean,0.0,train_on_variant,heterophily_ratio_before,Heterophily ratio before,,False,canonical,0.2268800139427185,0.0,0.2268800139427185,0.2268800139427185,1,clean
+yelpchi,clean,0.0,train_on_variant,heterophily_ratio_shift,Heterophily ratio shift,,False,canonical,0.0,0.0,0.0,0.0,1,clean
+yelpchi,clean,0.0,train_on_variant,realized_change,Realized change,none,False,canonical,0.0,0.0,0.0,0.0,1,clean
+yelpchi,clean,0.0,train_on_variant,requested_change,Requested change,none,False,canonical,0.0,0.0,0.0,0.0,1,clean
+yelpchi,heterophily_rewire_nonoracle,0.3,train_on_variant,heterophily_ratio_after,Heterophily ratio after,,False,heterograph_aware_generation,0.23186924723661181,0.0,0.23186924723661181,0.23186924723661181,1,scenario
+yelpchi,heterophily_rewire_nonoracle,0.3,train_on_variant,heterophily_ratio_before,Heterophily ratio before,,False,heterograph_aware_generation,0.22688002058785683,0.0,0.22688002058785683,0.22688002058785683,1,scenario
+yelpchi,heterophily_rewire_nonoracle,0.3,train_on_variant,heterophily_ratio_shift,Heterophily ratio shift,,False,heterograph_aware_generation,0.00498922664875498,0.0,0.00498922664875498,0.00498922664875498,1,scenario
+yelpchi,heterophily_rewire_nonoracle,0.3,train_on_variant,n_rewired_edges_actual,Rewired edges,edges,False,heterograph_aware_generation,2415404.0,0.0,2415404.0,2415404.0,1,scenario
+yelpchi,heterophily_rewire_nonoracle,0.3,train_on_variant,realized_change,Realized change,edges_changed,False,heterograph_aware_generation,2415404.0,0.0,2415404.0,2415404.0,1,scenario
+yelpchi,heterophily_rewire_nonoracle,0.3,train_on_variant,requested_change,Requested change,edges_selected,False,heterograph_aware_generation,2415404.0,0.0,2415404.0,2415404.0,1,scenario
+yelpchi,heterophily_rewire_oracle,0.3,train_on_variant,heterophily_ratio_after,Heterophily ratio after,,True,heterograph_aware_generation,0.45895631389923774,0.0,0.45895631389923774,0.45895631389923774,1,scenario
+yelpchi,heterophily_rewire_oracle,0.3,train_on_variant,heterophily_ratio_before,Heterophily ratio before,,True,heterograph_aware_generation,0.22688002058785683,0.0,0.22688002058785683,0.22688002058785683,1,scenario
+yelpchi,heterophily_rewire_oracle,0.3,train_on_variant,heterophily_ratio_shift,Heterophily ratio shift,,True,heterograph_aware_generation,0.2320762933113809,0.0,0.2320762933113809,0.2320762933113809,1,scenario
+yelpchi,heterophily_rewire_oracle,0.3,train_on_variant,n_rewired_edges_actual,Rewired edges,edges,True,heterograph_aware_generation,2415404.0,0.0,2415404.0,2415404.0,1,scenario
+yelpchi,heterophily_rewire_oracle,0.3,train_on_variant,realized_change,Realized change,edges_changed,True,heterograph_aware_generation,2415404.0,0.0,2415404.0,2415404.0,1,scenario
+yelpchi,heterophily_rewire_oracle,0.3,train_on_variant,requested_change,Requested change,edges_selected,True,heterograph_aware_generation,2415404.0,0.0,2415404.0,2415404.0,1,scenario
+yelpchi,noise_edges_uniform,0.2,train_on_variant,heterophily_ratio_after,Heterophily ratio after,,False,heterograph_aware_generation,0.2305089235305786,0.0,0.2305089235305786,0.2305089235305786,1,scenario
+yelpchi,noise_edges_uniform,0.2,train_on_variant,heterophily_ratio_before,Heterophily ratio before,,False,heterograph_aware_generation,0.2268800139427185,0.0,0.2268800139427185,0.2268800139427185,1,scenario
+yelpchi,noise_edges_uniform,0.2,train_on_variant,heterophily_ratio_shift,Heterophily ratio shift,,False,heterograph_aware_generation,0.0036289095878601074,0.0,0.0036289095878601074,0.0036289095878601074,1,scenario
+yelpchi,noise_edges_uniform,0.2,train_on_variant,n_added_edge_pairs_actual,Added edge pairs,edges,False,heterograph_aware_generation,1610269.0,0.0,1610269.0,1610269.0,1,scenario
+yelpchi,noise_edges_uniform,0.2,train_on_variant,realized_change,Realized change,edges_added,False,heterograph_aware_generation,1610269.0,0.0,1610269.0,1610269.0,1,scenario
+yelpchi,noise_edges_uniform,0.2,train_on_variant,requested_change,Requested change,edges_requested,False,heterograph_aware_generation,1610269.0,0.0,1610269.0,1610269.0,1,scenario
