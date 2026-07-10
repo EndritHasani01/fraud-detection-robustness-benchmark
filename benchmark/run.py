@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import time
+import traceback
 from pathlib import Path
 
 from .config import (
@@ -92,10 +93,6 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
         variants_tmp_path.unlink()
     if variant_audit_tmp_path.exists():
         variant_audit_tmp_path.unlink()
-    if paths.variants_csv_path.exists():
-        paths.variants_csv_path.unlink()
-    if paths.variant_audit_csv_path.exists():
-        paths.variant_audit_csv_path.unlink()
     ensure_csv_header(variants_tmp_path, VARIANTS_COLUMNS, overwrite=True)
     if export_variant_audit:
         ensure_variant_audit_csv(variant_audit_tmp_path, overwrite=True)
@@ -519,6 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except Exception as e:
         stage_status = "failed"
+        traceback.print_exc()
         print(f"[run] ERROR: {e}")
         return 1
     finally:

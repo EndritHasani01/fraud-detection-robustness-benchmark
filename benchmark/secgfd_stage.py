@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from .results import (
     write_result_row,
 )
 from .summarize import summarize_results_by_training_seed
-from .variants import VariantRow, filter_variants, load_graph_bin, require_variants_csv_rows, set_seeds
+from .variants import filter_variants, load_graph_bin, require_variants_csv_rows, set_seeds
 
 SECGFD_DEFAULT_HPARAMS = {
     "hid_dim": 32,
@@ -215,10 +216,18 @@ def _nce_loss_fixed(emb, features, labels, train_idx, *, eps: float = 1e-8):
     if int(normal_mask.sum().item()) == 0 or int(anomaly_mask.sum().item()) == 0:
         return torch.tensor(0.0, device=features.device)
 
-    sim = F.cosine_similarity(features, emb, dim=1)
-    nor = sim[train_idx[normal_mask]].mean()
-    abn = sim[train_idx[anomaly_mask]].mean()
-    return -torch.log((nor + float(eps)) / (abn + float(eps)))
+    # Cosine similarity is in [-1, 1], while the original log-ratio assumes
+    # positive inputs. Shift into [0, 1] so valid negative cosine values cannot
+    # turn the loss into NaN.
+    sim = (F.cosine_similarity(features, emb, dim=1) + 1.0) * 0.5
+    nor = sim[train_idx[normal_mask]].mean().clamp_min(float(eps))
+    abn = sim[train_idx[anomaly_mask]].mean().clamp_min(float(eps))
+    loss = -torch.log(nor / abn)
+    if not bool(torch.isfinite(loss).item()):
+        raise RuntimeError(
+            f"SEC-GFD contrastive loss became non-finite (normal={float(nor)}, anomaly={float(abn)})."
+        )
+    return loss
 
 
 def _resolve_secgfd_graph_device(g, *, device: str):
@@ -592,6 +601,7 @@ def run_secgfd_stage(
         try:
             g = load_graph_bin(Path(v.graph_path))
         except Exception as e:
+            traceback.print_exc()
             dt = time.perf_counter() - graph_t0
             for training_seed, run_key in pending_runs:
                 write_result_row(
@@ -652,6 +662,7 @@ def run_secgfd_stage(
                     roc_auc=float(out["roc_auc"]),
                 )
             except Exception as e:
+                traceback.print_exc()
                 dt = time.perf_counter() - run_t0
                 write_result_row(
                     results_csv,
@@ -679,4 +690,5 @@ def run_secgfd_stage(
         results_csv,
         out_csv_path=out_dir / "results_summary_secgfd.csv",
         model_ids={"secgfd"},
+        protocols={PROTOCOL_TRAIN_ON_VARIANT},
     )

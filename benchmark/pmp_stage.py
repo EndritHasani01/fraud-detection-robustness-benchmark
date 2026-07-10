@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,6 @@ from .results import (
 )
 from .summarize import summarize_results_by_training_seed
 from .variants import (
-    VariantRow,
     class_weights_from_train_labels,
     filter_variants,
     load_graph_bin,
@@ -45,8 +45,6 @@ class PMPModelArtifact:
 
 
 def _row_normalize_features(x, *, eps: float = 0.01):
-    import torch
-
     denom = x.sum(dim=1, keepdim=True) + float(eps)
     return x / denom
 
@@ -612,6 +610,7 @@ def run_pmp_stage(
         try:
             g = load_graph_bin(Path(v.graph_path))
         except Exception as e:
+            traceback.print_exc()
             dt = time.perf_counter() - graph_t0
             for training_seed, run_key in pending_runs:
                 write_result_row(
@@ -667,6 +666,7 @@ def run_pmp_stage(
                     roc_auc=float(out["roc_auc"]),
                 )
             except Exception as e:
+                traceback.print_exc()
                 dt = time.perf_counter() - run_t0
                 write_result_row(
                     results_csv,
@@ -694,4 +694,5 @@ def run_pmp_stage(
         results_csv,
         out_csv_path=out_dir / "results_summary_pmp.csv",
         model_ids={"pmp"},
+        protocols={PROTOCOL_TRAIN_ON_VARIANT},
     )

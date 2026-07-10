@@ -23,10 +23,9 @@ def _to_1d_label_tensor(labels):
 def compute_graph_stats(g, *, label_key: str = "label") -> dict[str, Any]:
     """Compute basic stats for a (homogeneous) DGL graph."""
     try:
-        import numpy as np
         import torch
     except Exception as e:  # pragma: no cover
-        raise RuntimeError("numpy and torch are required to compute graph stats.") from e
+        raise RuntimeError("PyTorch is required to compute graph stats.") from e
 
     n_nodes = int(g.num_nodes())
     n_edges = int(g.num_edges())
