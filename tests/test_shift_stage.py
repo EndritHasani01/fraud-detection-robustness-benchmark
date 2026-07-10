@@ -159,6 +159,7 @@ class ShiftStageTests(unittest.TestCase):
             self.assertEqual(Path(summary_args[0]).resolve(), (out_dir / "results.csv").resolve())
             self.assertEqual(Path(summary_kwargs["out_csv_path"]).resolve(), (out_dir / "results_summary_shift.csv").resolve())
             self.assertEqual(summary_kwargs["model_ids"], {"mlp"})
+            self.assertEqual(summary_kwargs["protocols"], {PROTOCOL_TRAIN_CLEAN_EVAL_ALL})
 
             rows = _read_csv_rows(out_dir / "results.csv")
             self.assertEqual(len(rows), 2)
@@ -166,6 +167,53 @@ class ShiftStageTests(unittest.TestCase):
             self.assertEqual({row["train_graph_ref"] for row in rows}, {str(clean_path)})
             self.assertEqual({row["status"] for row in rows}, {"ok"})
             self.assertEqual({row["graph_path"] for row in rows}, {str(clean_path), str(pert_path)})
+
+    def test_shift_stage_records_clean_graph_load_error_without_name_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            clean_path = out_dir / "graphs" / "clean.bin"
+            _write_variant_csv(
+                out_dir / "graph_variants.csv",
+                rows=[
+                    _variant_row(
+                        graph_path=str(clean_path),
+                        base_graph_path=str(clean_path),
+                        scenario_id="clean",
+                    )
+                ],
+            )
+            cfg = {
+                "experiment_name": "exp",
+                "datasets": [{"dataset_id": "yelpchi", "source_name": "yelp"}],
+                "models": [{"model_id": "mlp"}],
+                "seeds": {"training_seeds": [0]},
+            }
+
+            with mock.patch(
+                "benchmark.shift_stage.load_graph_bin",
+                side_effect=RuntimeError("native loader failure " + "x" * 600),
+            ):
+                with mock.patch("benchmark.shift_stage.summarize_results_by_training_seed"):
+                    run_shift_stage(
+                        cfg,
+                        out_dir=out_dir,
+                        force=False,
+                        skip_existing=True,
+                        retry_errors=False,
+                        device="cpu",
+                        include_noop=True,
+                        only_clean=True,
+                        max_variants=None,
+                        max_training_seeds=None,
+                        max_epochs=None,
+                        patience=None,
+                    )
+
+            rows = _read_csv_rows(out_dir / "results.csv")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["status"], "error")
+            self.assertIn("native loader failure", rows[0]["error"])
+            self.assertLessEqual(len(rows[0]["error"]), 500)
 
 
 class MatrixProtocolDispatchTests(unittest.TestCase):

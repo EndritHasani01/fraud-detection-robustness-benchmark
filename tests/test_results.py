@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -185,6 +186,47 @@ class ResultsCsvTests(unittest.TestCase):
             self.assertEqual(rows[0]["train_graph_ref"], "clean.bin")
             self.assertEqual(rows[0]["protocol"], PROTOCOL_TRAIN_ON_VARIANT)
             self.assertEqual(rows[0]["status"], "ok")
+
+    def test_write_result_row_rejects_non_finite_success_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "results.csv"
+            ensure_results_csv(path)
+            variant = SimpleNamespace(
+                experiment_name="exp",
+                dataset_id="yelpchi",
+                split_id="s0",
+                graph_seed=0,
+                scenario_id="clean",
+                severity=0.0,
+                n_nodes=10,
+                n_edges=12,
+                mean_in_degree=1.2,
+                median_in_degree=1.0,
+                mean_out_degree=1.2,
+                median_out_degree=1.0,
+                heterophily_ratio=0.3,
+                pos_rate=0.2,
+                base_graph_path="base.bin",
+                graph_path="base.bin",
+            )
+
+            with self.assertRaisesRegex(ValueError, "average_precision"):
+                write_result_row(
+                    path,
+                    variant,
+                    model_id="mlp",
+                    training_seed=0,
+                    protocol=PROTOCOL_TRAIN_ON_VARIANT,
+                    metrics={
+                        "roc_auc": 0.9,
+                        "average_precision": math.nan,
+                        "f1_macro": 0.7,
+                        "threshold": 0.5,
+                        "duration_sec": 1.0,
+                    },
+                )
+
+            self.assertEqual(self._read_csv_rows(path), [])
 
     def test_baselines_stage_skips_completed_rows_before_graph_load(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

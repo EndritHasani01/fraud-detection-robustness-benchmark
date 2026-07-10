@@ -7,10 +7,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import torch
+
 from benchmark.run import main
 from benchmark.secgfd_stage import (
     _SECGFD_THETA_CACHE,
     _install_secgfd_theta_cache,
+    _nce_loss_fixed,
     run_secgfd_stage,
 )
 
@@ -64,6 +67,16 @@ def _write_variant_csv(path: Path) -> None:
 
 
 class SecgfdCacheTests(unittest.TestCase):
+    def test_nce_loss_remains_finite_for_negative_cosine_similarity(self) -> None:
+        features = torch.tensor([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+        embeddings = torch.tensor([[-1.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+        labels = torch.tensor([0, 0, 1, 1])
+        train_idx = torch.arange(4)
+
+        loss = _nce_loss_fixed(embeddings, features, labels, train_idx)
+
+        self.assertTrue(torch.isfinite(loss))
+
     def test_theta_cache_avoids_recomputing_same_degree(self) -> None:
         _SECGFD_THETA_CACHE.clear()
         calls = {"count": 0}

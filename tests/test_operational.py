@@ -135,7 +135,36 @@ class RunModelsCliTests(unittest.TestCase):
         self.assertIn("[run] stage=graphs interrupted", log)
         self.assertNotIn("[run] stage=graphs done", log)
 
-    def test_graphs_only_removes_partial_variants_manifest_on_failure(self) -> None:
+    def test_run_main_preserves_traceback_for_failed_stage(self) -> None:
+        cfg = {"experiment_name": "exp"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                with mock.patch("benchmark.run.load_json", return_value=cfg):
+                    with mock.patch("benchmark.run.validate_config"):
+                        with mock.patch("benchmark.run.print_graphs_preflight"):
+                            with mock.patch(
+                                "benchmark.run._graphs_only",
+                                side_effect=RuntimeError("native loader failure"),
+                            ):
+                                rc = main(
+                                    [
+                                        "--config",
+                                        "dummy.json",
+                                        "--out",
+                                        tmpdir,
+                                        "--stage",
+                                        "graphs",
+                                    ]
+                                )
+
+        self.assertEqual(rc, 1)
+        self.assertIn("[run] ERROR: native loader failure", stdout.getvalue())
+        self.assertIn("RuntimeError: native loader failure", stderr.getvalue())
+
+    def test_graphs_only_preserves_previous_manifests_on_failed_rebuild(self) -> None:
         cfg = {
             "experiment_name": "exp",
             "graph_representation": {"canonical_view": "homogeneous"},
@@ -163,8 +192,10 @@ class RunModelsCliTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "boom"):
                     _graphs_only(cfg, out_dir=out_dir, force=False, force_reload=False)
 
-            self.assertFalse(stale_manifest.exists())
-            self.assertFalse(stale_audit.exists())
+            self.assertTrue(stale_manifest.exists())
+            self.assertTrue(stale_audit.exists())
+            self.assertGreater(stale_manifest.stat().st_size, 0)
+            self.assertGreater(stale_audit.stat().st_size, 0)
             self.assertFalse((out_dir / "graph_variants.csv.tmp").exists())
             self.assertFalse((out_dir / "variant_audit.csv.tmp").exists())
 
