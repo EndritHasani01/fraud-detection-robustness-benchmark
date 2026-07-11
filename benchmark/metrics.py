@@ -172,6 +172,7 @@ def best_f1_macro_threshold(y_true, y_score) -> ThresholdSearchResult:
     """Pick a threshold using ONLY the provided labels/scores.
 
     Search strategy:
+    - Evaluate the all-negative prediction using the smallest representable threshold above the maximum score.
     - Evaluate thresholds at each unique score value (descending), with rule: predict 1 iff score >= threshold.
     - Deterministic tie-breaking: keeps the first (highest threshold) that achieves the best score.
     """
@@ -196,8 +197,19 @@ def best_f1_macro_threshold(y_true, y_score) -> ThresholdSearchResult:
     # Cumulative positives in the prefix (predicted positive set for a given threshold).
     tp_prefix = np.cumsum((y_sorted == 1).astype(np.int64))
 
-    best_thr = float("inf")
-    best_f1 = -1.0
+    # Include the endpoint before the first score group: no sample is predicted
+    # positive. This can be optimal for macro-F1 on an imbalanced validation
+    # set. Keep the returned threshold finite so it remains safe to serialize
+    # and reuse during test evaluation.
+    max_score = float(s_sorted[0])
+    if max_score < float(np.finfo(np.float64).max):
+        best_thr = float(np.nextafter(max_score, np.inf))
+        f1_neg = (2 * n_neg) / (2 * n_neg + n_pos)
+        best_f1 = 0.5 * f1_neg
+    else:
+        # There is no finite float64 threshold above the largest finite float.
+        best_thr = float("inf")
+        best_f1 = -1.0
 
     i = 0
     while i < n:

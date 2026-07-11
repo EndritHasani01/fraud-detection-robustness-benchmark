@@ -276,8 +276,8 @@ def write_result_row(
         effective_duration = metrics.get("duration_sec", "")
         if duration_sec is not None:
             effective_duration = float(duration_sec)
-        bounded_metrics: dict[str, float] = {}
-        for metric_name in ("roc_auc", "average_precision", "f1_macro", "threshold"):
+        validated_metrics: dict[str, float] = {}
+        for metric_name in ("roc_auc", "average_precision", "f1_macro"):
             try:
                 metric_value = float(metrics.get(metric_name, ""))
             except Exception as e:
@@ -287,7 +287,17 @@ def write_result_row(
                     f"Result metric '{metric_name}' must be finite and within [0, 1]; "
                     f"found {metric_value!r}."
                 )
-            bounded_metrics[metric_name] = metric_value
+            validated_metrics[metric_name] = metric_value
+        try:
+            threshold = float(metrics.get("threshold", ""))
+        except Exception as e:
+            raise ValueError("Result metric 'threshold' is not numeric.") from e
+        if not math.isfinite(threshold):
+            raise ValueError(
+                "Result metric 'threshold' must be finite; "
+                f"found {threshold!r}."
+            )
+        validated_metrics["threshold"] = threshold
         try:
             effective_duration = float(effective_duration)
         except Exception as e:
@@ -298,7 +308,7 @@ def write_result_row(
             )
         row.update(
             {
-                **bounded_metrics,
+                **validated_metrics,
                 "duration_sec": effective_duration,
                 "status": "ok",
                 "error": "",

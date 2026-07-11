@@ -236,14 +236,17 @@ def _resolve_secgfd_graph_device(g, *, device: str):
     if device not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
     if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
+        raise RuntimeError(
+            "CUDA was requested for SEC-GFD training, but PyTorch reports that CUDA is unavailable."
+        )
 
     if device == "cuda":
         try:
             g = g.to("cuda")
-        except Exception:
-            device = "cpu"
-            g = g.to("cpu")
+        except Exception as exc:
+            raise RuntimeError(
+                "CUDA was requested for SEC-GFD, but the graph could not be moved to CUDA."
+            ) from exc
     else:
         g = g.to("cpu")
     return g, str(device)
@@ -378,7 +381,7 @@ def train_secgfd_model(
         repo_root=repo_root,
         state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
         threshold=float(th.threshold),
-        device=str(device),
+        device=str(effective_device),
         hid_dim=int(hid_dim),
         order_d=int(order_d),
         high_order=int(high_order),

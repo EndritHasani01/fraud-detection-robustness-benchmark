@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import time
 import traceback
 from pathlib import Path
@@ -29,6 +30,24 @@ from .results import (
 from .scenario_audit import append_variant_audit_row, build_variant_audit_row, ensure_variant_audit_csv
 
 
+def _graph_build_fingerprint() -> str:
+    """Hash the code that defines source conversion and graph perturbations."""
+    module_dir = Path(__file__).resolve().parent
+    component_names = (
+        "run.py",
+        "data.py",
+        "relation_utils.py",
+        "scenarios.py",
+    )
+    digest = hashlib.sha256()
+    for name in component_names:
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((module_dir / name).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _default_out_dir(cfg: dict, config_path: Path) -> Path:
     # Default: runs/<experiment_name> next to repo root.
     # If this is run from somewhere else, it still behaves reasonably.
@@ -45,7 +64,6 @@ def _make_source_graph(cfg: dict, dataset_cfg: dict, split_cfg: dict, *, out_dir
 
     dataset_id = dataset_cfg["dataset_id"]
     source_name = dataset_cfg["source_name"]
-    split_id = split_cfg["split_id"]
     split_seed = int(split_cfg["split_seed"])
     train_size = float(split_cfg["train_size"])
     val_size = float(split_cfg["val_size"])
@@ -99,6 +117,7 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
 
     experiment_name = cfg["experiment_name"]
     graph_seeds = get_graph_seeds(cfg)
+    graph_build_fingerprint = _graph_build_fingerprint()
     try:
         for dataset_cfg in cfg["datasets"]:
             dataset_id = dataset_cfg["dataset_id"]
@@ -117,11 +136,13 @@ def _graphs_only(cfg: dict, *, out_dir: Path, force: bool, force_reload: bool) -
                 base_meta = {
                     "experiment_name": experiment_name,
                     "dataset_id": dataset_id,
+                    "dataset_source_name": source_name,
                     "split_id": split_id,
                     "split_seed": split_seed,
                     "train_size": float(split_cfg["train_size"]),
                     "val_size": float(split_cfg["val_size"]),
                     "canonical_view": canonical_view,
+                    "graph_build_fingerprint": graph_build_fingerprint,
                     "created_unix": time.time(),
                 }
                 save_graph(base_p, g_base, base_meta, force=force)

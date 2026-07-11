@@ -12,6 +12,22 @@ class CacheError(RuntimeError):
     pass
 
 
+_NON_PROVENANCE_META_KEYS = {"created_unix", "graph_bytes", "graph_sha256"}
+
+
+def _normalized_provenance(meta: dict[str, Any]) -> dict[str, Any]:
+    """Return the immutable graph-build metadata in JSON-normalized form."""
+    provenance = {
+        key: value
+        for key, value in meta.items()
+        if key not in _NON_PROVENANCE_META_KEYS
+    }
+    # Metadata is persisted as JSON, which turns tuples into lists and normalizes
+    # other JSON-compatible containers. Compare the requested and stored forms
+    # after the same conversion so equivalent metadata does not miss the cache.
+    return json.loads(json.dumps(provenance, sort_keys=True))
+
+
 def _write_json(path: Path, obj: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -52,8 +68,9 @@ def save_graph(graph_path: GraphPath, graph, meta: dict[str, Any], *, force: boo
         ) from e
 
     if graph_path.graph_bin_path.exists() and not force:
+        existing_meta: dict[str, Any] = {}
+        existing_cache_valid = False
         try:
-            existing_meta: dict[str, Any] = {}
             if graph_path.meta_json_path.exists():
                 with graph_path.meta_json_path.open("r", encoding="utf-8") as handle:
                     existing_meta = json.load(handle)
@@ -64,17 +81,26 @@ def save_graph(graph_path: GraphPath, graph, meta: dict[str, Any], *, force: boo
             cached = existing[0]
             if int(cached.num_nodes()) != int(graph.num_nodes()) or int(cached.num_edges()) != int(graph.num_edges()):
                 raise CacheError("Cached graph dimensions do not match the requested graph.")
+            existing_cache_valid = True
+        except Exception:
+            # A corrupt or mismatched final file is safe to rebuild because the
+            # replacement below is published atomically.
+            pass
+        if existing_cache_valid:
+            stored_provenance = _normalized_provenance(existing_meta)
+            requested_provenance = _normalized_provenance(meta)
+            if stored_provenance != requested_provenance:
+                raise CacheError(
+                    "Cached graph provenance does not match the requested graph build. "
+                    "Refusing to reuse or relabel the existing graph; rerun the graph stage with --force."
+                )
             meta_with_integrity = {
-                **meta,
+                **existing_meta,
                 "graph_bytes": graph_path.graph_bin_path.stat().st_size,
                 "graph_sha256": _sha256_file(graph_path.graph_bin_path),
             }
             _write_json(graph_path.meta_json_path, meta_with_integrity)
             return
-        except Exception:
-            # A corrupt or mismatched final file is safe to rebuild because the
-            # replacement below is published atomically.
-            pass
 
     temp_graph = graph_path.graph_bin_path.with_suffix(graph_path.graph_bin_path.suffix + ".tmp")
     if temp_graph.exists():

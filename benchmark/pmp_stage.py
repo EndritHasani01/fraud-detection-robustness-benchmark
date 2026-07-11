@@ -234,7 +234,9 @@ def _resolve_requested_device(device: str) -> str:
     if device not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
     if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
+        raise RuntimeError(
+            "CUDA was requested for PMP training, but PyTorch reports that CUDA is unavailable."
+        )
     return str(device)
 
 
@@ -283,9 +285,10 @@ def _build_pmp_model(g, *, repo_root: Path, cfg_pmp: dict[str, Any], device: str
     if effective_device == "cuda":
         try:
             model = model.to("cuda")
-        except Exception:
-            effective_device = "cpu"
-            model = model.to("cpu")
+        except Exception as exc:
+            raise RuntimeError(
+                "CUDA was requested for PMP, but the model could not be moved to CUDA."
+            ) from exc
     else:
         model = model.to("cpu")
     return model, relations, effective_device
@@ -394,7 +397,7 @@ def train_pmp_model(
             cfg_pmp=dict(cfg_pmp),
             state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
             threshold=float(th.threshold),
-            device=str(device),
+            device=str(effective_device),
         )
     finally:
         g.ndata["feature"] = orig_x

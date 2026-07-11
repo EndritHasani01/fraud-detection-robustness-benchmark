@@ -92,13 +92,17 @@ def _resolve_baseline_device(model_id: str, g, device: str):
     if device not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
     if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
+        raise RuntimeError(
+            "CUDA was requested for baseline training, but PyTorch reports that CUDA is unavailable."
+        )
 
     if model_id == "sage" and device == "cuda":
         try:
             g = g.to("cuda")
-        except Exception:
-            device = "cpu"
+        except Exception as exc:
+            raise RuntimeError(
+                "CUDA was requested for GraphSAGE, but the graph could not be moved to CUDA."
+            ) from exc
     return g, str(device)
 
 
@@ -221,7 +225,7 @@ def train_baseline_model(
         hparams=hparams,
         state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
         threshold=float(th.threshold),
-        device=str(device),
+        device=str(effective_device),
         feature_key=feature_key,
         label_key=label_key,
     )
