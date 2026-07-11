@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository developed from a working experiment pipeline into a reproducible and auditable robustness benchmark for graph-based fraud detection. The lessons below come from the v1-to-v3 development history, the repository architecture and tests, and the Kaggle execution recorded in `KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs.ipynb`.
+This repository developed from a working experiment pipeline into a reproducible and auditable robustness benchmark for graph-based fraud detection. The lessons below come from the v1-to-v3 development history, the repository architecture and tests, and the two Kaggle executions recorded in `KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs.ipynb` and `KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest.ipynb`.
 
 The Kaggle run is especially instructive. It showed that scientific design, Python correctness, package installation, native-library compatibility, successful execution, and report completeness are separate quality layers. Each layer needs its own evidence.
 
@@ -88,6 +88,12 @@ The failed Kaggle run installed the requested Python, PyTorch, and DGL packages,
 
 A GPU runtime is valid only after it can import PyTorch and DGL, resolve required native libraries, create a DGL graph on CUDA, execute a small operation, and repeat that probe on both physical GPUs.
 
+### A compatible wheel tag is not native-dependency closure
+
+The second Kaggle execution showed a stricter version of the same lesson. PyTorch and DGL were both CUDA 11.8 wheels, and `pip check` passed, yet DGL still could not load because the PyTorch wheel did not ship `libcusparse.so.11`. Python package metadata, matching `+cu118` labels, and a successful import of PyTorch do not prove that an external extension's ELF dependencies are complete.
+
+For GPU stacks, validation should inspect the actual files, run `ldd` on the external native library, and execute a representative operation. If a required runtime component is absent, install its pinned official package explicitly; a loader-path change cannot discover a binary that was never installed.
+
 ### Use one subprocess environment definition
 
 CUDA visibility, DGL backend, Python paths, native-library paths, thread limits, and unbuffered logging should be produced by one shared environment builder. Dependency probes, tests, graph generation, smoke runs, and full training should all use it. A probe run under different environment variables does not validate the real execution path.
@@ -119,6 +125,10 @@ Errors should retain the original exception type and message, chained traceback,
 The recorded Kaggle execution continued into later cells after earlier failures. Therefore, reaching a later cell is not proof that its prerequisites succeeded.
 
 Every major stage should publish and verify explicit state, such as runtime validated, adapters validated, tests passed, graphs complete, smoke complete, each protocol complete, and reporting complete. Dependent cells should check these states before doing any work.
+
+### `SKIPPED` is not the same as unexecuted
+
+In the second run, every code cell received an execution count, but 32 cells printed `SKIPPED` after prerequisite checks failed. This was useful error containment, not silent Kaggle scheduling behavior. Reports should distinguish cell execution, phase execution, and scientific completion so a safe no-op is neither mistaken for success nor reported as a platform skip. The clean revision now uses `BLOCKED` for this state.
 
 ### Use informative operational checks
 

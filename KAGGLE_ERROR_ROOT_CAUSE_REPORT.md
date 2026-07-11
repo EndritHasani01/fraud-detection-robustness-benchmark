@@ -1,5 +1,11 @@
 # Kaggle notebook error root-cause report
 
+## Superseding update from the second Kaggle execution
+
+A second saved execution is analyzed in [`KAGGLE_LATEST_RUN_ROOT_CAUSE_REPORT.md`](KAGGLE_LATEST_RUN_ROOT_CAUSE_REPORT.md). In that rerun, all 67 code cells executed; 32 deliberately printed `SKIPPED`, and only two stored errors remained. The fail-closed gates therefore fixed the earlier cascade behavior.
+
+The rerun also refines this report's native-linker diagnosis. Prepending native-library directories is necessary but was insufficient: the installed PyTorch 2.1.0+cu118 wheel did not contain `libcusparse.so.11`, and no separate CUDA 11 cuSPARSE runtime package was installed. The repaired clean notebook now explicitly installs and inventories `nvidia-cusparse-cu11==11.7.5.86` before running `ldd` and the two-GPU DGL probes. Treat the new report as authoritative for the current repair.
+
 ## Scope and evidence
 
 This report analyzes the stored outputs and execution metadata in `KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs.ipynb`. It distinguishes failures that were actually observed from risks in code paths that the failed run never reached. It does not treat a file's existence, a successful setup cell, or a header-only CSV as evidence that the experiment ran.
