@@ -66,7 +66,7 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
 
     def test_single_source_and_completion_guards_are_present(self) -> None:
         required_tokens = (
-            "single-source-v3-r3-2026-07-11",
+            "single-source-v3-r4-2026-07-11",
             "current_project_repo_downloaded': False",
             "RUN_FINGERPRINT_SHA256",
             "EXPECTED_PATCHED_FILE_HASHES",
@@ -100,6 +100,11 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
     def test_native_cuda_dependency_is_pinned_and_proved_before_dgl(self) -> None:
         required_tokens = (
             "torch==2.1.0+cu118",
+            "nvidia_cuda_runtime_cu11-11.8.89-py3-none-manylinux1_x86_64.whl",
+            "f587bd726eb2f7612cf77ce38a2c1e65cf23251ff49437f6161ce0d647f64f7c",
+            "nvidia-cuda-runtime-cu11",
+            "libcudart.so.11.0",
+            "d0da41ae1323cf4eeb610123d69d7714124cfe5ebfcc4e45f02b910e51c57ee6",
             "nvidia_cusparse_cu11-11.7.5.86-py3-none-manylinux1_x86_64.whl",
             "4ae709fe78d3f23f60acaba8c54b8ad556cf16ca486e0cc1aa92dca7555d2d2b",
             "nvidia-cusparse-cu11",
@@ -111,9 +116,97 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, self.all_source)
 
-        install_position = self.all_source.index("nvidia_cusparse_cu11-11.7.5.86")
+        runtime_position = self.all_source.index("nvidia_cuda_runtime_cu11-11.8.89")
+        cusparse_position = self.all_source.index("nvidia_cusparse_cu11-11.7.5.86")
         linker_position = self.all_source.index("['ldd', str(DGL_NATIVE_LIBRARY)]")
-        self.assertLess(install_position, linker_position)
+        self.assertLess(runtime_position, linker_position)
+        self.assertLess(cusparse_position, linker_position)
+
+    def test_setup_retries_invalidate_descendants_and_flags_are_safe(self) -> None:
+        required_tokens = (
+            "SETUP_RECEIPT_ORDER",
+            "def invalidate_setup_from(stage: str)",
+            "NATIVE_LINKER_VALIDATED = False",
+            "CUDA_RUNTIME_VALIDATED = False",
+            "ADAPTERS_VALIDATED = False",
+            "NOTEBOOK_TESTS_PASSED = False",
+            "globals().get('NATIVE_LINKER_VALIDATED') is True",
+        )
+        for token in required_tokens:
+            with self.subTest(token=token):
+                self.assertIn(token, self.all_source)
+
+        setup_stages = (
+            "preflight",
+            "venv",
+            "packages",
+            "native_linker",
+            "post_setup_disk",
+            "upstreams",
+            "upstream_patches",
+            "config",
+            "embedded_modules",
+            "cuda_runtime",
+            "adapters",
+            "tests",
+            "experiment_scale",
+        )
+        for stage in setup_stages:
+            with self.subTest(stage=stage):
+                self.assertIn(f"invalidate_setup_from('{stage}')", self.all_source)
+        self.assertNotIn("assert NATIVE_LINKER_VALIDATED", self.all_source)
+
+        setup_cell = next(
+            self._source(cell)
+            for cell in self.cells
+            if "def invalidate_setup_from(stage: str)" in self._source(cell)
+        )
+        parsed = ast.parse(setup_cell)
+        required_assignments = {
+            "SETUP_RECEIPTS",
+            "NATIVE_LINKER_VALIDATED",
+            "CUDA_RUNTIME_VALIDATED",
+            "ADAPTERS_VALIDATED",
+            "NOTEBOOK_TESTS_PASSED",
+            "RUNTIME_INFO",
+            "ADAPTER_CLASSES",
+            "SETUP_RECEIPT_ORDER",
+        }
+        selected_nodes = []
+        for node in parsed.body:
+            if isinstance(node, ast.Assign):
+                names = {
+                    target.id
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                }
+                if names & required_assignments:
+                    selected_nodes.append(node)
+            elif isinstance(node, ast.FunctionDef) and node.name == "invalidate_setup_from":
+                selected_nodes.append(node)
+
+        namespace: dict[str, object] = {}
+        exec(compile(ast.Module(selected_nodes, type_ignores=[]), "setup-contract", "exec"), namespace)
+        order = namespace["SETUP_RECEIPT_ORDER"]
+        self.assertIsInstance(order, tuple)
+        namespace["SETUP_RECEIPTS"] = {name: {"attempt_id": "x"} for name in order}
+        for flag in (
+            "NATIVE_LINKER_VALIDATED",
+            "CUDA_RUNTIME_VALIDATED",
+            "ADAPTERS_VALIDATED",
+            "NOTEBOOK_TESTS_PASSED",
+        ):
+            namespace[flag] = True
+        namespace["runtime_env"] = object()
+
+        namespace["invalidate_setup_from"]("packages")
+
+        self.assertEqual(set(namespace["SETUP_RECEIPTS"]), {"preflight", "venv"})
+        self.assertFalse(namespace["NATIVE_LINKER_VALIDATED"])
+        self.assertFalse(namespace["CUDA_RUNTIME_VALIDATED"])
+        self.assertFalse(namespace["ADAPTERS_VALIDATED"])
+        self.assertFalse(namespace["NOTEBOOK_TESTS_PASSED"])
+        self.assertNotIn("runtime_env", namespace)
 
     def test_completion_requires_fresh_report_and_interpretation_receipts(self) -> None:
         required_receipts = {

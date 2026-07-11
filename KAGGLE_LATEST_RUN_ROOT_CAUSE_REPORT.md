@@ -1,5 +1,9 @@
 # Latest Kaggle rerun: root-cause and recovery report
 
+## Superseding update from the r3 target execution
+
+A later r3 execution resolved cuSPARSE but exposed `libcudart.so.11.0 => not found`, followed by a secondary stale-state `NameError`. That evidence and the r4 repair are documented in [`KAGGLE_R3_CUDART_ROOT_CAUSE_REPORT.md`](KAGGLE_R3_CUDART_ROOT_CAUSE_REPORT.md). Revision r4 now installs the official canonical CUDA runtime provider as well as cuSPARSE and invalidates all dependent setup receipts on retry. Treat the r3 report as the current runtime diagnosis; the r2 analysis below remains chronological evidence.
+
 ## Scope
 
 This report analyzes `KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest.ipynb`. It supersedes the current-runtime diagnosis from the earlier saved execution while preserving `KAGGLE_ERROR_ROOT_CAUSE_REPORT.md` as historical evidence. The clean `KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb` remains the single runtime source of truth; the notebook with outputs is evidence only and was not edited.
@@ -113,4 +117,6 @@ A target rerun is accepted only when all of the following are visible in retaine
 
 Local review can prove JSON validity, Python syntax, embedded-source hash consistency, package and gate contracts, and repository regression behavior. It cannot prove the live Kaggle driver, network, DGL wheel, upstream repositories, full YelpChi graph cache, or several-hour dual-T4 workload. Revision r3 is therefore ready for a fresh **Run All**, but scientific success must still be established by the checklist above and a new output-bearing notebook.
 
-Local validation of the delivered clean artifact passed the full 101-test suite (including six notebook-artifact contract tests), Ruff F/E9 checks, `git diff --check`, `nbformat` schema validation, all 67 code cells parsed, 91 unique cell IDs, and zero stored outputs. The delivered notebook has SHA-256 `884e48e05427e1b0fe1d46b8d604c5f309bf74e7f57963fe387f1a9d72a29a8d`.
+The validation figures and SHA-256 below describe the superseded r3 artifact. See the r3 canonical-cuDART report for the current r4 validation record.
+
+Local validation of r3 passed the full 101-test suite (including six notebook-artifact contract tests), Ruff F/E9 checks, `git diff --check`, `nbformat` schema validation, all 67 code cells parsed, 91 unique cell IDs, and zero stored outputs. The r3 notebook had SHA-256 `884e48e05427e1b0fe1d46b8d604c5f309bf74e7f57963fe387f1a9d72a29a8d`.

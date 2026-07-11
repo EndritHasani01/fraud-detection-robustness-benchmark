@@ -94,6 +94,10 @@ The second Kaggle execution showed a stricter version of the same lesson. PyTorc
 
 For GPU stacks, validation should inspect the actual files, run `ldd` on the external native library, and execute a representative operation. If a required runtime component is absent, install its pinned official package explicitly; a loader-path change cannot discover a binary that was never installed.
 
+### A binary can exist under the wrong loader filename
+
+The next Kaggle execution found `torch/lib/libcudart-d0da41ae.so.11.0`, while DGL requested the canonical `libcudart.so.11.0`. A directory can therefore contain the right library implementation without containing a filename that satisfies another extension's `DT_NEEDED` entry. The robust correction is the pinned official CUDA-runtime package that publishes the canonical file, followed by `ldd`; an improvised compatibility symlink should not replace the real provider.
+
 ### Use one subprocess environment definition
 
 CUDA visibility, DGL backend, Python paths, native-library paths, thread limits, and unbuffered logging should be produced by one shared environment builder. Dependency probes, tests, graph generation, smoke runs, and full training should all use it. A probe run under different environment variables does not validate the real execution path.
@@ -129,6 +133,10 @@ Every major stage should publish and verify explicit state, such as runtime vali
 ### `SKIPPED` is not the same as unexecuted
 
 In the second run, every code cell received an execution count, but 32 cells printed `SKIPPED` after prerequisite checks failed. This was useful error containment, not silent Kaggle scheduling behavior. Reports should distinguish cell execution, phase execution, and scientific completion so a safe no-op is neither mistaken for success nor reported as a platform skip. The clean revision now uses `BLOCKED` for this state.
+
+### A retry must revoke downstream success
+
+A success receipt and an in-memory Boolean describe the same stage and must change together. Re-executing an upstream setup cell should first remove its own receipt and every dependent receipt, reset the associated flags, and clear partially derived globals. Otherwise a failed retry can leave success-shaped state behind and allow a later cell to enter with undefined or stale variables. Ordered invalidation turns manual partial reruns into safe `BLOCKED` states instead of misleading secondary exceptions.
 
 ### Use informative operational checks
 
