@@ -83,6 +83,54 @@ class CacheTests(unittest.TestCase):
 
             self.assertEqual((graph.num_nodes(), graph.num_edges()), (10, 20))
 
+    def test_save_graph_rejects_valid_same_shape_cache_with_different_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = base_graph_path(Path(tmpdir), "yelpchi", "s0")
+            first_meta = {
+                "scenario_id": "rewire",
+                "graph_seed": 7,
+                "graph_build_fingerprint": "implementation-a",
+                "created_unix": 1.0,
+            }
+            changed_meta = {
+                **first_meta,
+                "graph_build_fingerprint": "implementation-b",
+                "created_unix": 2.0,
+            }
+            with mock.patch.dict(sys.modules, _fake_dgl_modules()):
+                save_graph(path, _FakeGraph(10, 20), first_meta, force=False)
+                original_graph = path.graph_bin_path.read_bytes()
+                original_meta = json.loads(path.meta_json_path.read_text(encoding="utf-8"))
+
+                with self.assertRaisesRegex(CacheError, "provenance does not match"):
+                    save_graph(path, _FakeGraph(10, 20), changed_meta, force=False)
+
+            self.assertEqual(path.graph_bin_path.read_bytes(), original_graph)
+            self.assertEqual(
+                json.loads(path.meta_json_path.read_text(encoding="utf-8")),
+                original_meta,
+            )
+
+    def test_save_graph_ignores_only_volatile_creation_time_when_reusing_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = base_graph_path(Path(tmpdir), "yelpchi", "s0")
+            with mock.patch.dict(sys.modules, _fake_dgl_modules()):
+                save_graph(
+                    path,
+                    _FakeGraph(10, 20),
+                    {"scenario_id": "clean", "created_unix": 1.0},
+                    force=False,
+                )
+                save_graph(
+                    path,
+                    _FakeGraph(10, 20),
+                    {"scenario_id": "clean", "created_unix": 2.0},
+                    force=False,
+                )
+
+            reused_meta = json.loads(path.meta_json_path.read_text(encoding="utf-8"))
+            self.assertEqual(reused_meta["created_unix"], 1.0)
+
     def test_failed_force_save_preserves_previous_final_graph(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = base_graph_path(Path(tmpdir), "yelpchi", "s0")

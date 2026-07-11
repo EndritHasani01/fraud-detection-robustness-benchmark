@@ -38,6 +38,28 @@ class MetricsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "threshold must be finite"):
             f1_macro_at_threshold([0, 1], [0.1, 0.9], math.inf)
 
+    def test_threshold_search_includes_all_negative_candidate(self) -> None:
+        labels = [0, 0, 0, 1]
+        scores = [0.9, 0.8, 0.7, 0.1]
+
+        result = best_f1_macro_threshold(labels, scores)
+
+        self.assertGreater(result.threshold, max(scores))
+        self.assertAlmostEqual(result.f1_macro, 3.0 / 7.0)
+        self.assertAlmostEqual(
+            result.f1_macro,
+            f1_macro_at_threshold(labels, scores, result.threshold),
+        )
+
+    def test_threshold_search_tie_breaks_toward_all_negative_candidate(self) -> None:
+        labels = [0, 1]
+        scores = [0.9, 0.1]
+
+        result = best_f1_macro_threshold(labels, scores)
+
+        self.assertGreater(result.threshold, max(scores))
+        self.assertAlmostEqual(result.f1_macro, 1.0 / 3.0)
+
     def test_metrics_reject_nonbinary_labels(self) -> None:
         with self.assertRaisesRegex(ValueError, "binary labels"):
             average_precision_binary([0, 2], [0.1, 0.9])

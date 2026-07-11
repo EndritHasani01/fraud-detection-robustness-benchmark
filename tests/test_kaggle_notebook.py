@@ -66,6 +66,7 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
 
     def test_single_source_and_completion_guards_are_present(self) -> None:
         required_tokens = (
+            "single-source-v3-r3-2026-07-11",
             "current_project_repo_downloaded': False",
             "RUN_FINGERPRINT_SHA256",
             "EXPECTED_PATCHED_FILE_HASHES",
@@ -78,7 +79,10 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             "require_disk_reserve",
             "report_zip_temp.replace(REPORT_ZIP)",
             "mark_phase('complete')",
-            "SKIPPED:",
+            "BLOCKED:",
+            "FINAL_REQUIRED_STAGE_RECEIPTS",
+            "stage_receipts_ready",
+            "Non-monotonic phase transition refused",
         )
         for token in required_tokens:
             with self.subTest(token=token):
@@ -91,6 +95,51 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             "MANIFEST_PATH.write_text(json.dumps(MANIFEST",
             self.all_source,
         )
+        self.assertNotIn("SKIPPED:", self.all_source)
+
+    def test_native_cuda_dependency_is_pinned_and_proved_before_dgl(self) -> None:
+        required_tokens = (
+            "torch==2.1.0+cu118",
+            "nvidia_cusparse_cu11-11.7.5.86-py3-none-manylinux1_x86_64.whl",
+            "4ae709fe78d3f23f60acaba8c54b8ad556cf16ca486e0cc1aa92dca7555d2d2b",
+            "nvidia-cusparse-cu11",
+            "libcusparse.so.11*",
+            "ldd",
+            "Unresolved DGL native libraries",
+        )
+        for token in required_tokens:
+            with self.subTest(token=token):
+                self.assertIn(token, self.all_source)
+
+        install_position = self.all_source.index("nvidia_cusparse_cu11-11.7.5.86")
+        linker_position = self.all_source.index("['ldd', str(DGL_NATIVE_LIBRARY)]")
+        self.assertLess(install_position, linker_position)
+
+    def test_completion_requires_fresh_report_and_interpretation_receipts(self) -> None:
+        required_receipts = {
+            "summaries_validated",
+            "plots_validated",
+            "report_artifacts_validated",
+            "report_tables_loaded",
+            "audit_table_validated",
+            "ap_tables_validated",
+            "figure_1",
+            "figure_2",
+            "figure_3",
+            "mlp_invariant",
+            "findings",
+        }
+        for receipt in required_receipts:
+            with self.subTest(receipt=receipt):
+                self.assertIn(f"'{receipt}'", self.all_source)
+
+        final_cell = next(
+            self._source(cell)
+            for cell in self.cells
+            if "FINAL_STATUS=complete" in self._source(cell)
+        )
+        self.assertIn("stage_receipts_ready", final_cell)
+        self.assertIn("FINAL_REQUIRED_STAGE_RECEIPTS", final_cell)
 
 
 if __name__ == "__main__":

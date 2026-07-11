@@ -11,7 +11,7 @@ from unittest import mock
 from benchmark.matrix_stage import run_matrix_stage
 from benchmark.preflight import build_expected_run_keys, summarize_training_preflight
 from benchmark.results import PROTOCOL_TRAIN_ON_VARIANT, append_result_row, ensure_results_csv
-from benchmark.run import _graphs_only, main
+from benchmark.run import _graph_build_fingerprint, _graphs_only, main
 
 
 def _write_variant_csv(path: Path) -> None:
@@ -60,6 +60,15 @@ def _write_variant_csv(path: Path) -> None:
                 "pos_rate": 0.2,
             }
         )
+
+
+class GraphBuildFingerprintTests(unittest.TestCase):
+    def test_graph_build_fingerprint_is_stable_sha256(self) -> None:
+        first = _graph_build_fingerprint()
+        second = _graph_build_fingerprint()
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 64)
+        self.assertTrue(all(character in "0123456789abcdef" for character in first))
 
 
 class RunModelsCliTests(unittest.TestCase):
