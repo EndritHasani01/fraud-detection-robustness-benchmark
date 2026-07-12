@@ -1,0 +1,11 @@
+protocol,scenario,smallest_mean_AP_drop_model,mean_AP_drop,oracle
+train_clean_eval_all,camouflage_feature_oracle,mlp,0.0824077322887228,True
+train_clean_eval_all,camouflage_relation_oracle,pmp,-0.0007109685477955,True
+train_clean_eval_all,heterophily_rewire_nonoracle,mlp,0.0,False
+train_clean_eval_all,heterophily_rewire_oracle,mlp,0.0,True
+train_clean_eval_all,noise_edges_uniform,mlp,0.0,False
+train_on_variant,camouflage_feature_oracle,secgfd,0.0755732821451408,True
+train_on_variant,camouflage_relation_oracle,secgfd,-0.0002479578458062,True
+train_on_variant,heterophily_rewire_nonoracle,secgfd,-0.0133332589053412,False
+train_on_variant,heterophily_rewire_oracle,secgfd,-0.5295739950612606,True
+train_on_variant,noise_edges_uniform,secgfd,-0.006070416477486,False
