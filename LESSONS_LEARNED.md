@@ -201,6 +201,16 @@ This order finds environment and integration defects before expensive graph gene
 
 The integration smoke should include both the clean graph and the largest expected graph, not only the easiest case. This gives an early, inexpensive check of adapter correctness and likely graph-memory pressure.
 
+### Generated Python is a separate program
+
+Parsing a notebook cell does not validate Python stored inside one of its strings. If a cell generates or patches source, tests must extract that payload, build the complete generated files, and compile those files before recording success. Diff equality and hashes only prove consistency; they can consistently describe invalid code when expected and actual content come from the same defective generator.
+
+Compatibility edits should be derived afresh from an immutable pinned revision such as `git show HEAD:<path>`, not from whatever partially patched file is on disk. Writing the one compiled expected result makes retries self-healing. Patch compilation, semantic import probes, exact changed-path checks, repository-status checks, and one final receipt belong to the same contract.
+
+### Import success is weaker than adapter success
+
+Importing a model class does not exercise its constructor, DGL sampler, tensor shapes, CUDA kernels, forward path, loss, gradients, or state restoration. A cheap pre-data gate should run representative forward/backward work through the exact integration adapter. The PMP incident also showed the value of testing boundary batch sizes: its upstream bare `squeeze()` removes the batch axis only when a batch contains one node, so ordinary multi-node smoke data cannot reveal the defect.
+
 ### Test scientific invariants as well as code paths
 
 Important invariants include unchanged labels and split masks, deterministic same-seed perturbations, explicit severity-zero no-ops, matching requested and realized counts, MLP stability under graph-only shift, validation-only threshold selection, failure on missing audit evidence, and successful resume without duplicate keys.

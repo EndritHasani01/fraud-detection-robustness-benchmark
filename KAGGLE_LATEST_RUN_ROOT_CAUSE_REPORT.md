@@ -1,5 +1,9 @@
 # Latest Kaggle rerun: root-cause and recovery report
 
+## Superseding update from the r4 target execution
+
+The r4 target execution cleared the earlier CUDA 11 linker blockers and reached the research-adapter gate. It then exposed a notebook-generated PMP indentation defect. The exact cause, why r4's hash checks accepted the malformed source, the self-healing r5 repair, and the new CUDA forward/backward probes are documented in [`KAGGLE_R4_PMP_PATCH_ROOT_CAUSE_REPORT.md`](KAGGLE_R4_PMP_PATCH_ROOT_CAUSE_REPORT.md). Treat that report as the current diagnosis; the native-library analysis below remains chronological evidence.
+
 ## Superseding update from the r3 target execution
 
 A later r3 execution resolved cuSPARSE but exposed `libcudart.so.11.0 => not found`, followed by a secondary stale-state `NameError`. That evidence and the r4 repair are documented in [`KAGGLE_R3_CUDART_ROOT_CAUSE_REPORT.md`](KAGGLE_R3_CUDART_ROOT_CAUSE_REPORT.md). Revision r4 now installs the official canonical CUDA runtime provider as well as cuSPARSE and invalidates all dependent setup receipts on retry. Treat the r3 report as the current runtime diagnosis; the r2 analysis below remains chronological evidence.
