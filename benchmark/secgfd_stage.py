@@ -52,6 +52,11 @@ class SECGFDModelArtifact:
     lemda: float
     lr: float
     weight_decay: float
+    epochs_trained: int = 0
+    best_epoch: int = 0
+    best_validation_monitor: float | None = None
+    validation_monitor: str = "roc_auc"
+    stopping_reason: str = "max_epochs"
 
 
 def _coerce_positive_int(value: Any, *, name: str) -> int:
@@ -333,8 +338,13 @@ def train_secgfd_model(
     best_monitor = -float("inf")
     best_state = None
     bad_epochs = 0
+    best_epoch = 0
+    epochs_trained = 0
+    best_monitor_name = "roc_auc"
+    stopping_reason = "max_epochs"
 
     for _epoch in range(int(epochs)):
+        epochs_trained = int(_epoch) + 1
         model.train()
         logits, emb = model(features)
 
@@ -351,15 +361,23 @@ def train_secgfd_model(
             val_scores = probs[val_idx].detach().cpu().numpy()
             val_labels = labels[val_idx].detach().cpu().numpy()
             val_auc = roc_auc_binary(val_labels, val_scores)
-            monitor = float(val_auc) if math.isfinite(val_auc) else -float(loss_ce.item())
+            if math.isfinite(val_auc):
+                monitor = float(val_auc)
+                monitor_name = "roc_auc"
+            else:
+                monitor = -float(loss_ce.item())
+                monitor_name = "negative_cross_entropy"
 
         if monitor > best_monitor:
             best_monitor = monitor
+            best_monitor_name = monitor_name
+            best_epoch = int(_epoch) + 1
             best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
             bad_epochs = 0
         else:
             bad_epochs += 1
             if es_patience > 0 and bad_epochs >= es_patience:
+                stopping_reason = "early_stopping"
                 opt.step()
                 break
 
@@ -388,6 +406,11 @@ def train_secgfd_model(
         lemda=float(lemda),
         lr=float(lr),
         weight_decay=float(weight_decay),
+        epochs_trained=int(epochs_trained),
+        best_epoch=int(best_epoch),
+        best_validation_monitor=(float(best_monitor) if math.isfinite(best_monitor) else None),
+        validation_monitor=str(best_monitor_name),
+        stopping_reason=str(stopping_reason),
     )
 
 
@@ -444,6 +467,11 @@ def eval_secgfd_model(
         "f1_macro": float(f1m),
         "threshold": use_threshold,
         "duration_sec": float(time.perf_counter() - t0),
+        "epochs_trained": int(artifact.epochs_trained),
+        "best_epoch": int(artifact.best_epoch),
+        "best_validation_monitor": artifact.best_validation_monitor,
+        "validation_monitor": artifact.validation_monitor,
+        "stopping_reason": artifact.stopping_reason,
     }
 
 

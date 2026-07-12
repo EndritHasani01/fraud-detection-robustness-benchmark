@@ -49,6 +49,11 @@ class BaselineModelArtifact:
     device: str
     feature_key: str = "feature"
     label_key: str = "label"
+    epochs_trained: int = 0
+    best_epoch: int = 0
+    best_validation_monitor: float | None = None
+    validation_monitor: str = "roc_auc"
+    stopping_reason: str = "max_epochs"
 
 
 def _forward_logits(model_id: str, model, g, x):
@@ -175,8 +180,13 @@ def train_baseline_model(
     best_monitor = -float("inf")
     best_state = None
     bad_epochs = 0
+    best_epoch = 0
+    epochs_trained = 0
+    best_monitor_name = "roc_auc"
+    stopping_reason = "max_epochs"
 
     for _epoch in range(int(hparams.max_epochs)):
+        epochs_trained = int(_epoch) + 1
         model.train()
         logits_train = _forward_logits(model_id, model, g, x_dev)
         loss = loss_fn(logits_train[train_idx], y_dev[train_idx])
@@ -194,18 +204,23 @@ def train_baseline_model(
             val_auc = roc_auc_binary(val_labels, val_scores)
             if math.isfinite(val_auc):
                 monitor = float(val_auc)
+                monitor_name = "roc_auc"
             else:
                 # Fallback: minimize validation loss if AUC is undefined.
                 val_loss = loss_fn(logits_eval[val_idx], y_dev[val_idx]).item()
                 monitor = -float(val_loss)
+                monitor_name = "negative_log_loss"
 
         if monitor > best_monitor:
             best_monitor = float(monitor)
+            best_monitor_name = monitor_name
+            best_epoch = int(_epoch) + 1
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             bad_epochs = 0
         else:
             bad_epochs += 1
             if bad_epochs >= int(hparams.patience):
+                stopping_reason = "early_stopping"
                 break
 
     if best_state is not None:
@@ -228,6 +243,11 @@ def train_baseline_model(
         device=str(effective_device),
         feature_key=feature_key,
         label_key=label_key,
+        epochs_trained=int(epochs_trained),
+        best_epoch=int(best_epoch),
+        best_validation_monitor=(float(best_monitor) if math.isfinite(best_monitor) else None),
+        validation_monitor=str(best_monitor_name),
+        stopping_reason=str(stopping_reason),
     )
 
 
@@ -271,6 +291,11 @@ def eval_baseline_model(
         "f1_macro": float(f1m),
         "threshold": use_threshold,
         "duration_sec": float(dt),
+        "epochs_trained": int(artifact.epochs_trained),
+        "best_epoch": int(artifact.best_epoch),
+        "best_validation_monitor": artifact.best_validation_monitor,
+        "validation_monitor": artifact.validation_monitor,
+        "stopping_reason": artifact.stopping_reason,
     }
 
 

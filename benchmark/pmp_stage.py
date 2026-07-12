@@ -42,6 +42,11 @@ class PMPModelArtifact:
     state_dict: dict[str, Any]
     threshold: float
     device: str
+    epochs_trained: int = 0
+    best_epoch: int = 0
+    best_validation_monitor: float | None = None
+    validation_monitor: str = "roc_auc"
+    stopping_reason: str = "max_epochs"
 
 
 def _row_normalize_features(x, *, eps: float = 0.01):
@@ -380,8 +385,12 @@ def train_pmp_model(
         best_monitor = -float("inf")
         best_state = None
         bad_epochs = 0
+        best_epoch = 0
+        epochs_trained = 0
+        stopping_reason = "max_epochs"
 
         for _epoch in range(epochs):
+            epochs_trained = int(_epoch) + 1
             model.train()
             for _in_nodes, _out_nodes, blocks in train_loader:
                 blocks = [b.to(effective_device) for b in blocks]
@@ -406,11 +415,13 @@ def train_pmp_model(
 
             if monitor > best_monitor:
                 best_monitor = monitor
+                best_epoch = int(_epoch) + 1
                 best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
                 bad_epochs = 0
             else:
                 bad_epochs += 1
                 if es_patience > 0 and bad_epochs >= es_patience:
+                    stopping_reason = "early_stopping"
                     break
 
         if best_state is not None:
@@ -424,6 +435,11 @@ def train_pmp_model(
             state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
             threshold=float(th.threshold),
             device=str(effective_device),
+            epochs_trained=int(epochs_trained),
+            best_epoch=int(best_epoch),
+            best_validation_monitor=(float(best_monitor) if math.isfinite(best_monitor) else None),
+            validation_monitor="roc_auc",
+            stopping_reason=str(stopping_reason),
         )
     finally:
         g.ndata["feature"] = orig_x
@@ -484,6 +500,11 @@ def eval_pmp_model(
             "f1_macro": float(f1m),
             "threshold": use_threshold,
             "duration_sec": float(time.perf_counter() - t0),
+            "epochs_trained": int(artifact.epochs_trained),
+            "best_epoch": int(artifact.best_epoch),
+            "best_validation_monitor": artifact.best_validation_monitor,
+            "validation_monitor": artifact.validation_monitor,
+            "stopping_reason": artifact.stopping_reason,
         }
     finally:
         g.ndata["feature"] = orig_x

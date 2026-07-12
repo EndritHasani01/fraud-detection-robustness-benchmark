@@ -36,6 +36,12 @@ RESULTS_COLUMNS = [
     "f1_macro",
     "threshold",
     "duration_sec",
+    # training diagnostics (blank for historical rows or failures before training)
+    "epochs_trained",
+    "best_epoch",
+    "best_validation_monitor",
+    "validation_monitor",
+    "stopping_reason",
     # graph stats (always available)
     "n_nodes",
     "n_edges",
@@ -310,6 +316,11 @@ def write_result_row(
             {
                 **validated_metrics,
                 "duration_sec": effective_duration,
+                "epochs_trained": metrics.get("epochs_trained", ""),
+                "best_epoch": metrics.get("best_epoch", ""),
+                "best_validation_monitor": metrics.get("best_validation_monitor", ""),
+                "validation_monitor": metrics.get("validation_monitor", ""),
+                "stopping_reason": metrics.get("stopping_reason", ""),
                 "status": "ok",
                 "error": "",
             }

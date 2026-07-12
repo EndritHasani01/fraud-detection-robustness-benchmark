@@ -41,11 +41,16 @@ def _stable_u32_seed(text: str) -> int:
     return int.from_bytes(digest[:4], "little", signed=False)
 
 
-def _rng_for_spec(spec: ScenarioSpec):
+def _rng_for_spec(spec: ScenarioSpec, *, include_severity: bool = True, stream: str = "scenario"):
     import numpy as np
 
     params_str = json.dumps(spec.params or {}, sort_keys=True, separators=(",", ":"))
-    seed_text = f"{spec.scenario_id}|{spec.method}|{spec.graph_seed}|{spec.severity:.8f}|{params_str}"
+    if include_severity and stream == "scenario":
+        # Preserve the v1-v3 deterministic seed contract exactly.
+        seed_text = f"{spec.scenario_id}|{spec.method}|{spec.graph_seed}|{spec.severity:.8f}|{params_str}"
+    else:
+        severity_text = f"|{spec.severity:.8f}" if include_severity else ""
+        seed_text = f"{spec.scenario_id}|{spec.method}|{spec.graph_seed}{severity_text}|{stream}|{params_str}"
     return np.random.default_rng(_stable_u32_seed(seed_text))
 
 
@@ -399,13 +404,14 @@ def _rewire_edge_dst_to_feature_pseudo_opposite_label(
     *,
     p_rewire: float,
     rng,
+    partition_rng,
     feature_key: str,
     label_key: str,
     relation_filter: Any,
     policy: EdgeSamplingPolicy,
 ):
     feats = _features_tensor(base_g, feature_key=feature_key)
-    pseudo_labels_np = _two_means_binary_labels(feats, rng)
+    pseudo_labels_np = _two_means_binary_labels(feats, partition_rng)
     labels_np = _labels_np(base_g, label_key=label_key)
     g2, info = _apply_partition_based_rewire(
         base_g,
@@ -417,6 +423,9 @@ def _rewire_edge_dst_to_feature_pseudo_opposite_label(
         policy=policy,
     )
     info["selection_proxy"] = "feature_two_means"
+    info["feature_partition_scope"] = (
+        "fixed_per_graph_seed" if partition_rng is not rng else "severity_specific"
+    )
     info["pseudo_label_pos_rate"] = float(pseudo_labels_np.mean()) if pseudo_labels_np.size else None
     return g2, info
 
@@ -550,6 +559,9 @@ def _relation_camouflage(
     label_key: str,
     relation_filter: Any,
     edges_per_node: int,
+    edge_degree_ratio: float | None,
+    min_edges_per_node: int,
+    max_edges_per_node: int | None,
     remove_suspicious_ratio: float,
     policy: EdgeSamplingPolicy,
 ):
@@ -586,10 +598,29 @@ def _relation_camouflage(
     additions_by_relation: dict[Any, list[tuple[int, int]]] = {key: [] for key in all_relation_edges}
     existing_by_relation = {key: edge_pair_set(src, dst) for key, (src, dst) in all_relation_edges.items()}
     added_relation_names: list[Any] = []
-    requested_edges = int(n_selected * max(1, int(edges_per_node)))
+    if edge_degree_ratio is None:
+        requested_by_node = {
+            int(node_id): max(1, int(edges_per_node))
+            for node_id in selected_nodes.tolist()
+        }
+        budget_mode = "fixed"
+    else:
+        selected_out_degree = np.zeros(labels_np.shape[0], dtype=np.int64)
+        for relation_key in relation_keys:
+            src, _dst = all_relation_edges[relation_key]
+            np.add.at(selected_out_degree, src.numpy(), 1)
+        requested_by_node = {}
+        for node_id in selected_nodes.tolist():
+            requested = int(np.ceil(float(selected_out_degree[int(node_id)]) * float(edge_degree_ratio)))
+            requested = max(int(min_edges_per_node), requested)
+            if max_edges_per_node is not None:
+                requested = min(int(max_edges_per_node), requested)
+            requested_by_node[int(node_id)] = max(1, requested)
+        budget_mode = "degree_relative"
+    requested_edges = int(sum(requested_by_node.values()))
 
     for node_id in selected_nodes.tolist():
-        for _ in range(max(1, int(edges_per_node))):
+        for _ in range(requested_by_node[int(node_id)]):
             relation_key = relation_keys[int(rng.integers(0, len(relation_keys), endpoint=False))]
             pending_edges = set(additions_by_relation[relation_key])
             attempts_left = _attempt_round_limit(int(normal_nodes.shape[0]), policy)
@@ -671,6 +702,11 @@ def _relation_camouflage(
             "fraud_to_fraud_neighbor_ratio_after": after_stats["fraud_to_fraud_neighbor_ratio"],
             "mean_selected_out_degree_before": before_stats["mean_selected_out_degree"],
             "mean_selected_out_degree_after": after_stats["mean_selected_out_degree"],
+            "camouflage_edge_budget_mode": budget_mode,
+            "camouflage_edge_degree_ratio": edge_degree_ratio,
+            "camouflage_min_edges_per_node": int(min_edges_per_node),
+            "camouflage_max_edges_per_node": max_edges_per_node,
+            "mean_camouflage_edges_requested_per_node": float(requested_edges / max(1, n_selected)),
             "relation_filter_applied": iter_relation_names(relation_keys),
             "n_camouflaged_edges_added_by_relation": _count_names(added_relation_names),
         }
@@ -685,6 +721,7 @@ def _add_random_edges(
     undirected: bool,
     rng,
     relation_filter: Any,
+    relation_allocation: str,
     policy: EdgeSamplingPolicy,
 ) -> tuple[Any, dict[str, Any]]:
     import numpy as np
@@ -703,13 +740,24 @@ def _add_random_edges(
         "n_added_edge_pairs_actual": 0,
         "undirected": bool(undirected),
         "relation_filter_applied": iter_relation_names(relation_keys),
+        "relation_allocation": str(relation_allocation),
         "sampling_policy": policy.as_dict(),
         **_sampling_rejection_counters("n_noise"),
     }
     if edge_noise_rate <= 0.0 or n_requested_pairs <= 0:
         return base_g, info
 
-    relation_ids = rng.integers(0, len(relation_keys), size=n_requested_pairs, endpoint=False)
+    if relation_allocation == "proportional":
+        relation_sizes = np.asarray(
+            [int(all_relation_edges[key][0].shape[0]) for key in relation_keys],
+            dtype=np.float64,
+        )
+        relation_probabilities = relation_sizes / relation_sizes.sum()
+        relation_ids = rng.choice(len(relation_keys), size=n_requested_pairs, replace=True, p=relation_probabilities)
+    elif relation_allocation == "uniform":
+        relation_ids = rng.integers(0, len(relation_keys), size=n_requested_pairs, endpoint=False)
+    else:
+        raise ValueError("relation_allocation must be 'uniform' or 'proportional'")
     requested_by_relation = Counter(relation_keys[int(idx)] for idx in relation_ids.tolist())
     n_nodes = graph_num_nodes(base_g)
     new_relation_edges = dict(all_relation_edges)
@@ -862,10 +910,17 @@ def apply_scenario(base_graph, spec: ScenarioSpec):
         )
         applied = int(info.get("n_rewired_edges_actual", info.get("n_rewired_edges", 0))) > 0
     elif spec.method == "rewire_edge_dst_to_feature_pseudo_opposite_label":
+        fixed_partition = bool(spec.params.get("fixed_feature_partition_across_severity", False))
+        partition_rng = (
+            _rng_for_spec(spec, include_severity=False, stream="feature_partition")
+            if fixed_partition
+            else rng
+        )
         g2, info = _rewire_edge_dst_to_feature_pseudo_opposite_label(
             base_graph,
             p_rewire=severity,
             rng=rng,
+            partition_rng=partition_rng,
             feature_key=feature_key,
             label_key=label_key,
             relation_filter=relation_filter,
@@ -891,6 +946,17 @@ def apply_scenario(base_graph, spec: ScenarioSpec):
             label_key=label_key,
             relation_filter=relation_filter,
             edges_per_node=int(spec.params.get("camouflage_edges_per_node", 1) or 1),
+            edge_degree_ratio=(
+                float(spec.params["camouflage_edge_degree_ratio"])
+                if spec.params.get("camouflage_edge_degree_ratio") is not None
+                else None
+            ),
+            min_edges_per_node=int(spec.params.get("camouflage_min_edges_per_node", 1) or 1),
+            max_edges_per_node=(
+                int(spec.params["camouflage_max_edges_per_node"])
+                if spec.params.get("camouflage_max_edges_per_node") is not None
+                else None
+            ),
             remove_suspicious_ratio=float(spec.params.get("remove_suspicious_ratio", 0.0) or 0.0),
             policy=policy,
         )
@@ -903,6 +969,7 @@ def apply_scenario(base_graph, spec: ScenarioSpec):
             undirected=undirected,
             rng=rng,
             relation_filter=relation_filter,
+            relation_allocation=str(spec.params.get("relation_allocation", "uniform")).strip().lower(),
             policy=policy,
         )
         applied = int(info.get("n_added_edges_actual_total", info.get("n_added_edges", 0))) > 0
