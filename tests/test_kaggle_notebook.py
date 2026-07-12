@@ -64,9 +64,28 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
         self.assertEqual(embedded, expected)
         self.assertEqual(len(embedded), 22)
 
+    def test_embedded_modules_match_repository_sources_exactly(self) -> None:
+        embedded: dict[str, str] = {}
+        prefix = "%%writefile /kaggle/working/fraud-notebook-source/benchmark/"
+        for cell in self.cells:
+            source = self._source(cell)
+            if source.startswith(prefix):
+                first_line, body = source.split("\n", 1)
+                name = "benchmark/" + first_line.rsplit("/", 1)[-1]
+                embedded[name] = body
+
+        local = {
+            path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted((ROOT / "benchmark").glob("*.py"))
+        }
+        self.assertEqual(set(embedded), set(local))
+        for name in sorted(local):
+            with self.subTest(module=name):
+                self.assertEqual(embedded[name], local[name])
+
     def test_single_source_and_completion_guards_are_present(self) -> None:
         required_tokens = (
-            "single-source-v3-r5-2026-07-12",
+            "single-source-v3-r6-2026-07-12",
             "current_project_repo_downloaded': False",
             "RUN_FINGERPRINT_SHA256",
             "EXPECTED_PATCHED_FILE_HASHES",
@@ -85,6 +104,10 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             "Non-monotonic phase transition refused",
             "ADAPTER_PROBE_INFO",
             "_reshape_binary_logits",
+            "MPLBACKEND",
+            "epochs_trained",
+            "protocol_contrasts.csv",
+            "worst_case_performance.csv",
         )
         for token in required_tokens:
             with self.subTest(token=token):

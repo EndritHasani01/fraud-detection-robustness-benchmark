@@ -64,6 +64,7 @@ class FrozenConfigFileTests(unittest.TestCase):
             "exp_yelpchi_v3_fast.json",
             "exp_yelpchi_v3.json",
             "exp_yelpchi_v3_full.json",
+            "exp_yelpchi_v4_multisplit.json",
         ):
             with self.subTest(config=name):
                 _load_config(name)
@@ -236,6 +237,25 @@ class FrozenConfigFileTests(unittest.TestCase):
                 "noise_edges_uniform": [0.0, 0.05, 0.1, 0.15, 0.2],
             },
         )
+
+    def test_v4_multisplit_config_prioritizes_split_replication_and_calibrated_camouflage(self) -> None:
+        cfg = _load_config("exp_yelpchi_v4_multisplit.json")
+        scenarios = _scenario_map(cfg)
+
+        self.assertEqual(cfg["experiment_name"], "gfd_robustness_benchmark_v4_multisplit")
+        self.assertEqual(
+            [(split["split_id"], split["split_seed"]) for split in cfg["data_splits"]],
+            [("s0", 717), ("s1", 1729), ("s2", 3253)],
+        )
+        self.assertEqual(get_graph_seeds(cfg), [0])
+        self.assertEqual(get_training_seeds(cfg), [0, 1, 2, 3, 4])
+        relation = scenarios["camouflage_relation_oracle"]
+        self.assertNotIn("camouflage_edges_per_node", relation)
+        self.assertEqual(relation["camouflage_edge_degree_ratio"], 0.25)
+        self.assertEqual(relation["camouflage_min_edges_per_node"], 4)
+        self.assertEqual(relation["camouflage_max_edges_per_node"], 64)
+        self.assertTrue(scenarios["heterophily_rewire_nonoracle"]["fixed_feature_partition_across_severity"])
+        self.assertEqual(scenarios["noise_edges_uniform"]["relation_allocation"], "proportional")
 
 
 if __name__ == "__main__":

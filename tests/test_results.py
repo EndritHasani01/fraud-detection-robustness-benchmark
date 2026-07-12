@@ -176,6 +176,11 @@ class ResultsCsvTests(unittest.TestCase):
                     "f1_macro": 0.66,
                     "threshold": 0.5,
                     "duration_sec": 1.25,
+                    "epochs_trained": 17,
+                    "best_epoch": 7,
+                    "best_validation_monitor": 0.81,
+                    "validation_monitor": "roc_auc",
+                    "stopping_reason": "early_stopping",
                 },
                 train_graph_ref="clean.bin",
             )
@@ -187,6 +192,11 @@ class ResultsCsvTests(unittest.TestCase):
             self.assertEqual(rows[0]["train_graph_ref"], "clean.bin")
             self.assertEqual(rows[0]["protocol"], PROTOCOL_TRAIN_ON_VARIANT)
             self.assertEqual(rows[0]["status"], "ok")
+            self.assertEqual(rows[0]["epochs_trained"], "17")
+            self.assertEqual(rows[0]["best_epoch"], "7")
+            self.assertEqual(rows[0]["best_validation_monitor"], "0.81")
+            self.assertEqual(rows[0]["validation_monitor"], "roc_auc")
+            self.assertEqual(rows[0]["stopping_reason"], "early_stopping")
 
     def test_write_result_row_rejects_non_finite_success_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

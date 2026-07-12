@@ -345,6 +345,37 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(info_a["pseudo_label_pos_rate"], info_b["pseudo_label_pos_rate"])
         self.assertFalse(torch.equal(g_a.edges()[1], g_c.edges()[1]))
 
+    def test_nonoracle_rewire_can_fix_feature_partition_across_severities(self) -> None:
+        base = _rewire_graph()
+        common = {"fixed_feature_partition_across_severity": True}
+        low = _spec(
+            scenario_id="heterophily_rewire_nonoracle",
+            family="heterophily",
+            method="rewire_edge_dst_to_feature_pseudo_opposite_label",
+            severity_param="p_rewire",
+            severity=0.5,
+            graph_seed=23,
+            oracle_labels=False,
+            params=common,
+        )
+        high = _spec(
+            scenario_id="heterophily_rewire_nonoracle",
+            family="heterophily",
+            method="rewire_edge_dst_to_feature_pseudo_opposite_label",
+            severity_param="p_rewire",
+            severity=1.0,
+            graph_seed=23,
+            oracle_labels=False,
+            params=common,
+        )
+
+        with mock.patch.dict(sys.modules, {"dgl": _fake_dgl_module()}):
+            _g_low, _applied_low, info_low = apply_scenario(base, low)
+            _g_high, _applied_high, info_high = apply_scenario(base, high)
+
+        self.assertEqual(info_low["feature_partition_scope"], "fixed_per_graph_seed")
+        self.assertEqual(info_low["pseudo_label_pos_rate"], info_high["pseudo_label_pos_rate"])
+
     def test_feature_camouflage_changes_expected_fraction_and_increases_similarity(self) -> None:
         base = _feature_camouflage_graph()
         spec = _spec(
@@ -420,6 +451,37 @@ class ScenarioTests(unittest.TestCase):
             base.num_edges(("node", "r1", "node")) + int(info["n_camouflaged_edges_added"]),
         )
         self.assertEqual(g2.num_edges(("node", "r2", "node")), base.num_edges(("node", "r2", "node")))
+        _assert_protected_node_data_unchanged(self, base, g2)
+
+    def test_relation_camouflage_supports_bounded_degree_relative_budgets(self) -> None:
+        base = _relation_camouflage_graph()
+        spec = _spec(
+            scenario_id="camouflage_relation_oracle",
+            family="camouflage_relation",
+            method="add_relation_camouflage_edges",
+            severity_param="p_cam_rel",
+            severity=1.0,
+            graph_seed=31,
+            oracle_labels=True,
+            params={
+                "camouflage_edge_degree_ratio": 2.0,
+                "camouflage_min_edges_per_node": 1,
+                "camouflage_max_edges_per_node": 3,
+                "relation_filter": ["r1"],
+                "remove_suspicious_ratio": 0.0,
+            },
+        )
+
+        with mock.patch.dict(sys.modules, {"dgl": _fake_dgl_module()}):
+            g2, applied, info = apply_scenario(base, spec)
+
+        self.assertTrue(applied)
+        self.assertEqual(info["camouflage_edge_budget_mode"], "degree_relative")
+        self.assertEqual(info["camouflage_edge_degree_ratio"], 2.0)
+        self.assertEqual(info["n_camouflaged_edges_requested"], 4)
+        self.assertEqual(info["n_camouflaged_edges_added"], 4)
+        self.assertEqual(info["mean_camouflage_edges_requested_per_node"], 2.0)
+        self.assertGreater(info["fraud_to_normal_neighbor_ratio_after"], info["fraud_to_normal_neighbor_ratio_before"])
         _assert_protected_node_data_unchanged(self, base, g2)
 
     def test_relation_camouflage_add_plus_remove_path_matches_logged_net_change(self) -> None:
@@ -540,6 +602,24 @@ class ScenarioTests(unittest.TestCase):
         self.assertTrue(applied_b)
         self.assertEqual(_edge_pairs(g_a), _edge_pairs(g_b))
         self.assertEqual(info_a["n_added_edge_pairs_actual"], info_b["n_added_edge_pairs_actual"])
+
+    def test_noise_records_proportional_relation_allocation(self) -> None:
+        base = _relation_camouflage_graph()
+        spec = _spec(
+            scenario_id="noise_edges_proportional",
+            family="noise",
+            method="add_random_edges",
+            severity_param="edge_noise_rate",
+            severity=0.4,
+            graph_seed=41,
+            oracle_labels=False,
+            params={"relation_allocation": "proportional", "relation_filter": ["r1", "r2"]},
+        )
+
+        with mock.patch.dict(sys.modules, {"dgl": _fake_dgl_module()}):
+            _g2, _applied, info = apply_scenario(base, spec)
+
+        self.assertEqual(info["relation_allocation"], "proportional")
 
 
 if __name__ == "__main__":
