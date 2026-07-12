@@ -11,6 +11,9 @@ These configs are the single source of truth for:
 Start with:
 - `configs/exp_yelpchi_v3.json`
 
+For the next confirmatory run, use:
+- `configs/exp_yelpchi_v4_multisplit.json`: three preregistered stratified splits, five training seeds, seed-aware reporting metadata, and bounded degree-relative relation camouflage. It intentionally uses one graph seed so the three-split graph cache fits the measured Kaggle disk budget.
+
 Additional frozen experiment definitions:
 - `configs/exp_yelpchi_v3_fast.json`: minimal developer config for quick end-to-end checks across the full v3 scenario surface
 - `configs/exp_yelpchi_v3_full.json`: larger v3 config with denser severity curves
