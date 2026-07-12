@@ -203,6 +203,19 @@ def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any
     return train_loader, val_loader, test_loader
 
 
+def _reshape_binary_logits(logits):
+    """Restore the batch dimension removed by PMP's terminal bare squeeze()."""
+    if logits.ndim == 1:
+        if int(logits.numel()) != 2:
+            raise RuntimeError(
+                f"PMP returned a one-dimensional tensor with {int(logits.numel())} values; expected 2."
+            )
+        logits = logits.reshape(1, 2)
+    if logits.ndim != 2 or int(logits.shape[1]) != 2:
+        raise RuntimeError(f"PMP logits must have shape [batch, 2], found {tuple(logits.shape)}.")
+    return logits
+
+
 def _predict_probs(model, relations, loader, *, device: str):
     import numpy as np
     import torch
@@ -216,9 +229,13 @@ def _predict_probs(model, relations, loader, *, device: str):
         for _input_nodes, _output_nodes, blocks in loader:
             blocks = [b.to(device) for b in blocks]
             feats = blocks[0].srcdata["feature"].to(device)
-            logits = model(blocks, relations, feats)
+            logits = _reshape_binary_logits(model(blocks, relations, feats))
             probs = F.softmax(logits, dim=1)[:, 1]
-            y = blocks[-1].dstdata["label"].to(device).squeeze().to(torch.int64)
+            y = blocks[-1].dstdata["label"].to(device).reshape(-1).to(torch.int64)
+            if int(logits.shape[0]) != int(y.shape[0]):
+                raise RuntimeError(
+                    f"PMP prediction/label batch mismatch: logits={tuple(logits.shape)}, labels={tuple(y.shape)}."
+                )
 
             y_true_parts.append(y.detach().cpu().numpy())
             y_score_parts.append(probs.detach().cpu().numpy())
@@ -264,6 +281,11 @@ def _build_pmp_model(g, *, repo_root: Path, cfg_pmp: dict[str, Any], device: str
     num_trans = int(cfg_pmp.get("num_trans", 1))
     agg = str(cfg_pmp.get("agg", "mean"))
     relation_agg = str(cfg_pmp.get("relation_agg", "cat"))
+    if relation_agg != "cat":
+        raise RuntimeError(
+            "The pinned PMP integration requires relation_agg='cat'. "
+            "Its upstream mean/add branches call torch reductions on a Python list."
+        )
 
     model = LASAGE_S(
         in_size=feat_dim,
@@ -364,9 +386,13 @@ def train_pmp_model(
             for _in_nodes, _out_nodes, blocks in train_loader:
                 blocks = [b.to(effective_device) for b in blocks]
                 feats = blocks[0].srcdata["feature"].to(effective_device)
-                labels = blocks[-1].dstdata["label"].to(effective_device).squeeze().to(torch.int64)
+                labels = blocks[-1].dstdata["label"].to(effective_device).reshape(-1).to(torch.int64)
 
-                logits = model(blocks, relations, feats)
+                logits = _reshape_binary_logits(model(blocks, relations, feats))
+                if int(logits.shape[0]) != int(labels.shape[0]):
+                    raise RuntimeError(
+                        f"PMP training batch mismatch: logits={tuple(logits.shape)}, labels={tuple(labels.shape)}."
+                    )
                 loss = loss_fn(logits, labels)
 
                 opt.zero_grad(set_to_none=True)
