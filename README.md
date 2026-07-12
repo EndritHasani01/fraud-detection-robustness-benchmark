@@ -13,6 +13,8 @@ The current implementation contract is documented in:
 
 - [docs/V3_BENCHMARK_REFERENCE.md](docs/V3_BENCHMARK_REFERENCE.md) for the technical benchmark contract, scenario semantics, audit artifacts, and interpretation limits
 - [docs/STAKEHOLDER_GUIDE.md](docs/STAKEHOLDER_GUIDE.md) for a plain-language summary of what the benchmark does and does not claim
+- [GFD_ROBUSTNESS_V3_R5_RESULTS_ANALYSIS.md](GFD_ROBUSTNESS_V3_R5_RESULTS_ANALYSIS.md) for the complete audit and interpretation of the latest executed R5 run
+- [GFD_ROBUSTNESS_RESEARCH_IMPROVEMENTS.md](GFD_ROBUSTNESS_RESEARCH_IMPROVEMENTS.md) for the ranked improvement proposal and implementation record
 
 ## What V3 Adds
 
@@ -22,6 +24,16 @@ The current implementation contract is documented in:
 - `variant_audit.csv` records requested and realized perturbation strength per graph variant.
 - The plots stage joins performance and audit evidence through `plots/performance_audit_join.csv`.
 - Protocol and oracle status remain visible in downstream summary CSVs and plots.
+
+## What The Post-R5 Research Hardening Adds
+
+- Confidence intervals respect crossed graph/training seeds, clean/stress pairing, and complete severity trajectories.
+- Oracle rows carry explicit diagnostic claim scopes and are ineligible for operational ranking.
+- `protocol_contrasts.csv` directly reports paired `train_on_variant - train_clean_eval_all` effects.
+- `worst_case_performance.csv` reports the lowest configured nonzero point, paired drop, and clean-retention fraction.
+- New result rows include epoch, best-validation, and stopping diagnostics.
+- Relation camouflage supports bounded degree-relative budgets; non-oracle rewiring can hold its feature partition fixed across severity; noise can preserve relation proportions.
+- `exp_yelpchi_v4_multisplit.json` defines the prospective three-split confirmatory run without changing frozen v1-v3 configs.
 
 ## Repository Layout
 
@@ -63,6 +75,7 @@ py -m pip install torchdata==0.8.0 PyYAML pydantic matplotlib
 | `configs/exp_yelpchi_v3_fast.json` | Fast v3 smoke test across the full scenario surface | `mlp`, `sage` | 1 graph seed, 1 training seed |
 | `configs/exp_yelpchi_v3.json` | Main v3 benchmark | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 3 training seeds |
 | `configs/exp_yelpchi_v3_full.json` | Larger v3 run with fuller severity curves | `mlp`, `sage`, `pmp`, `secgfd` | 2 graph seeds, 5 training seeds |
+| `configs/exp_yelpchi_v4_multisplit.json` | Prospective three-split confirmatory benchmark with calibrated scenario controls | `mlp`, `sage`, `pmp`, `secgfd` | 1 graph seed, 5 training seeds, 3 splits |
 
 `configs/README.md` summarizes the same set of frozen experiment definitions.
 
@@ -132,7 +145,7 @@ py -m benchmark.run --config configs/exp_yelpchi_v3.json --stage baselines --onl
 | `--max-training-seeds N` | Caps the number of training seeds used from the config. |
 | `--max-epochs N`, `--patience N` | Global training-control overrides for the training stages. |
 | `--secgfd-hid-dim`, `--secgfd-order-d`, `--secgfd-high-order` | SEC-GFD-only CLI overrides for fast runtime experiments. |
-| `--ci` | On `--stage plots`, computes bootstrap 95% confidence intervals and uses them for error bars. |
+| `--ci` | On `--stage plots`, computes seed-aware 95% descriptive bootstrap intervals and records the method and random-axis counts. |
 
 ## Outputs
 
@@ -158,6 +171,8 @@ Plot/report artifacts under `plots/`:
 - `summary_curves.csv`
 - `performance_drop_max_stress.csv`
 - `robustness_scores.csv`
+- `protocol_contrasts.csv`
+- `worst_case_performance.csv`
 - `audit_curves.csv`
 - `summary_curves_cross_split.csv`
 - `performance_drop_max_stress_cross_split.csv`
@@ -183,14 +198,15 @@ Important columns added or emphasized across v2 and v3:
 - `average_precision`: added alongside `roc_auc` and `f1_macro`
 - `status` and `error`: support resumability, retry, and completeness reporting
 - `duration_sec`: populated for both successful and failed runs
+- `epochs_trained`, `best_epoch`, `best_validation_monitor`, `validation_monitor`, and `stopping_reason`: training diagnostics for new successful rows; historical migrated rows remain blank
 
 ## Reporting And Disclosure Notes
 
-- Oracle perturbations are explicitly disclosed. `graph_variants.csv` carries `oracle_labels`, and the plots stage propagates that field into summary CSVs and plot legends/titles.
+- Oracle perturbations are explicitly disclosed. Report rows add `claim_scope` and `operational_ranking_eligible`; oracle training exposure is diagnostic and never an operational ranking.
 - `variant_audit.csv` is the required companion artifact for interpreting scenario strength. Use realized audit metrics instead of raw severity alone when you need to justify how strongly a graph was perturbed.
 - The plots stage is protocol-aware. Standard and shift-protocol runs are written to separate output subdirectories and remain distinguishable in plot CSVs.
 - `plots/performance_audit_join.csv` provides the report-stage join between performance rows and perturbation evidence.
-- With `--ci`, plot CSVs include `ci_lower` and `ci_upper` columns in addition to mean/std.
+- With `--ci`, plot CSVs include `ci_lower`, `ci_upper`, `ci_method`, and seed/split counts. Point SD is empirical; intervals resample declared random axes.
 - Cross-split summary CSVs are always written; they are most useful when the config defines multiple `data_splits`.
 - The plots stage prints a completeness summary and writes `missing_or_error_runs.csv` so report gaps are visible before figures are used.
 
@@ -200,7 +216,7 @@ Interpretation boundaries for the current benchmark are intentional: this is a c
 
 - Split masks are deterministic per `split_id`.
 - Graph perturbations are deterministic per `graph_seed`.
-- Thresholds are chosen on validation only; no test leakage is allowed.
+- Model fitting, early stopping, and thresholds use training/validation data only. Oracle stress construction is the explicit exception: it may read all labels, including test-node labels, and is therefore scoped as a diagnostic rather than ordinary no-test-label evaluation.
 - `results.csv` is the single source of truth for all final tables and figures.
 
 ## Troubleshooting
