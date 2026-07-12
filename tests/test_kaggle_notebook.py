@@ -66,7 +66,7 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
 
     def test_single_source_and_completion_guards_are_present(self) -> None:
         required_tokens = (
-            "single-source-v3-r4-2026-07-11",
+            "single-source-v3-r5-2026-07-12",
             "current_project_repo_downloaded': False",
             "RUN_FINGERPRINT_SHA256",
             "EXPECTED_PATCHED_FILE_HASHES",
@@ -83,6 +83,8 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             "FINAL_REQUIRED_STAGE_RECEIPTS",
             "stage_receipts_ready",
             "Non-monotonic phase transition refused",
+            "ADAPTER_PROBE_INFO",
+            "_reshape_binary_logits",
         )
         for token in required_tokens:
             with self.subTest(token=token):
@@ -96,6 +98,97 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             self.all_source,
         )
         self.assertNotIn("SKIPPED:", self.all_source)
+
+    def test_generated_upstream_sources_are_compiled_and_self_healing(self) -> None:
+        patch_cell = next(
+            self._source(cell)
+            for cell in self.cells
+            if "pmp_fallback = (" in self._source(cell)
+        )
+        parsed = ast.parse(patch_cell)
+        fallback_assignment = next(
+            node
+            for node in ast.walk(parsed)
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "pmp_fallback"
+                for target in node.targets
+            )
+        )
+        fallback = ast.literal_eval(fallback_assignment.value)
+        self.assertEqual(
+            fallback.splitlines(),
+            [
+                "try:",
+                "    from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm",
+                "except ImportError:",
+                "    GraphNorm = nn.Identity",
+                "    GraphSizeNorm = nn.Identity",
+            ],
+        )
+        compile("import torch.nn as nn\n" + fallback, "generated-pmp", "exec")
+        self.assertNotIn("except Exception", fallback)
+
+        required_tokens = (
+            "'show', f'HEAD:{relative}'",
+            "compile(expected, f'PMP/{relative}', 'exec')",
+            "compile(sec_expected, f'SEC-GFD/{sec_relative}', 'exec')",
+            "'-m', 'py_compile'",
+            "GraphNorm(4)(features)",
+            "module.GCN(4, 3, 2, graph)",
+            "'diff', 'HEAD', '--check'",
+            "allow_zero_in_degree=True",
+        )
+        for token in required_tokens:
+            with self.subTest(token=token):
+                self.assertIn(token, patch_cell)
+
+        self.assertLess(
+            patch_cell.index("compile(expected, f'PMP/{relative}', 'exec')"),
+            patch_cell.index(".write_text("),
+        )
+        self.assertLess(
+            patch_cell.index("module.GCN(4, 3, 2, graph)"),
+            patch_cell.index("record_setup_receipt('upstream_patches'"),
+        )
+        self.assertEqual(
+            patch_cell.count("record_setup_receipt('upstream_patches'"),
+            1,
+        )
+        self.assertEqual(
+            self.all_source.count("invalidate_setup_from('upstream_patches')"),
+            1,
+        )
+        self.assertNotIn("if pmp_fallback not in source", patch_cell)
+
+    def test_adapter_gate_executes_cuda_forward_backward_and_singleton_eval(self) -> None:
+        adapter_cell = next(
+            self._source(cell)
+            for cell in self.cells
+            if "Adapter CUDA forward/backward validation failed" in self._source(cell)
+        )
+        required_tokens = (
+            "_make_dataloaders",
+            "_build_pmp_model",
+            "_predict_probs",
+            "singleton_loader",
+            "singleton_eval_rows",
+            "_build_secgfd_model",
+            "_resolve_secgfd_graph_device",
+            "loss.backward()",
+            "torch.cuda.synchronize()",
+            "runtime_env(0)",
+            "'upstream_patches', 'config', 'embedded_modules', 'cuda_runtime'",
+        )
+        for token in required_tokens:
+            with self.subTest(token=token):
+                self.assertIn(token, adapter_cell)
+        self.assertEqual(adapter_cell.count("loss.backward()"), 2)
+        self.assertEqual(adapter_cell.count("torch.cuda.synchronize()"), 2)
+        self.assertLess(
+            adapter_cell.index("loss.backward()"),
+            adapter_cell.index("record_setup_receipt('adapters'"),
+        )
 
     def test_native_cuda_dependency_is_pinned_and_proved_before_dgl(self) -> None:
         required_tokens = (
@@ -170,6 +263,7 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             "NOTEBOOK_TESTS_PASSED",
             "RUNTIME_INFO",
             "ADAPTER_CLASSES",
+            "ADAPTER_PROBE_INFO",
             "SETUP_RECEIPT_ORDER",
         }
         selected_nodes = []
@@ -206,6 +300,7 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
         self.assertFalse(namespace["CUDA_RUNTIME_VALIDATED"])
         self.assertFalse(namespace["ADAPTERS_VALIDATED"])
         self.assertFalse(namespace["NOTEBOOK_TESTS_PASSED"])
+        self.assertEqual(namespace["ADAPTER_PROBE_INFO"], {})
         self.assertNotIn("runtime_env", namespace)
 
     def test_completion_requires_fresh_report_and_interpretation_receipts(self) -> None:

@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from benchmark.pmp_stage import _resolve_pmp_num_workers, resolve_pmp_config, run_pmp_stage
+import torch
+
+from benchmark.pmp_stage import (
+    _reshape_binary_logits,
+    _resolve_pmp_num_workers,
+    resolve_pmp_config,
+    run_pmp_stage,
+)
 from benchmark.shift_stage import run_shift_stage
 
 
@@ -70,6 +77,16 @@ def _write_variant_csv(path: Path, *, rows: list[dict[str, object]]) -> None:
 
 
 class PmpConfigTests(unittest.TestCase):
+    def test_singleton_pmp_logits_restore_the_batch_dimension(self) -> None:
+        logits = torch.tensor([0.25, 0.75])
+        restored = _reshape_binary_logits(logits)
+        self.assertEqual(tuple(restored.shape), (1, 2))
+        self.assertTrue(torch.equal(restored[0], logits))
+
+    def test_malformed_pmp_logits_are_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, r"shape \[batch, 2\]"):
+            _reshape_binary_logits(torch.zeros(2, 3))
+
     def test_resolve_pmp_config_shallow_merges_benchmark_hparams(self) -> None:
         base_cfg = {
             "full_neighbors": True,
