@@ -226,6 +226,8 @@ Every training artifact monitors validation ROC-AUC, restores the best state, an
 
 These protocols answer different questions and must never be averaged. In oracle scenarios, `train_on_variant` additionally lets the learner train on topology or features constructed from labels across the entire graph. It is therefore marked `oracle_privileged_training_diagnostic` and excluded from operational rankings. Oracle `train_clean_eval_all` is marked `oracle_shift_sensitivity_diagnostic`.
 
+The two non-oracle scenario families use `claim_scope=non_oracle_controlled_stress` and are the only rows with `operational_ranking_eligible=true`. That flag means eligible for comparison within this synthetic benchmark; it does not imply that the perturbation is a realistic attacker model.
+
 ### 4.4 Stress tests
 
 | Scenario | Nonzero severities | Construction | Oracle? | Intended target |
