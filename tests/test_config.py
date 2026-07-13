@@ -71,8 +71,14 @@ class ConfigSeedTests(unittest.TestCase):
         cfg["data_splits"].append(
             {"split_id": "s1", "split_seed": 0, "train_size": 0.4, "val_size": 0.2}
         )
-        with self.assertRaisesRegex(ConfigError, r"unique split_seed"):
+        with self.assertRaisesRegex(ConfigError, r"must not repeat the same"):
             validate_config(cfg)
+
+        cfg = _base_cfg()
+        cfg["data_splits"].append(
+            {"split_id": "s1", "split_seed": 0, "train_size": 0.6, "val_size": 0.2}
+        )
+        validate_config(cfg)
 
         cfg = _base_cfg()
         cfg["data_splits"][0]["val_size"] = 0.7

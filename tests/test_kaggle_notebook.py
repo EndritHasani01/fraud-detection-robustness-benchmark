@@ -7,9 +7,14 @@ import re
 import unittest
 from pathlib import Path
 
+from benchmark.config import validate_config
+from benchmark.preflight import count_graph_variant_rows
+from tools.sync_kaggle_notebook import sync_notebook
+
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK_PATH = ROOT / "KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb"
+FACTORIAL_CONFIG_PATH = ROOT / "configs" / "exp_yelpchi_v4_factorial.json"
 
 
 class KaggleNotebookArtifactTests(unittest.TestCase):
@@ -23,6 +28,19 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
         cls.notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
         cls.cells = cls.notebook["cells"]
         cls.all_source = "\n".join(cls._source(cell) for cell in cls.cells)
+        config_source = next(
+            cls._source(cell)
+            for cell in cls.cells
+            if "NOTEBOOK_CONFIG = json.loads" in cls._source(cell)
+        )
+        match = re.search(
+            r"NOTEBOOK_CONFIG\s*=\s*json\.loads\(r'''(\{.*?\})'''\)",
+            config_source,
+            re.DOTALL,
+        )
+        if match is None:
+            raise AssertionError("Notebook config JSON was not found")
+        cls.inline_config = json.loads(match.group(1))
 
     def test_notebook_is_clean_and_has_unique_cell_ids(self) -> None:
         self.assertEqual(self.notebook["nbformat"], 4)
@@ -85,7 +103,7 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
 
     def test_single_source_and_completion_guards_are_present(self) -> None:
         required_tokens = (
-            "single-source-v3-r6-2026-07-12",
+            "single-source-v4-factorial-r1-2026-07-13",
             "current_project_repo_downloaded': False",
             "RUN_FINGERPRINT_SHA256",
             "EXPECTED_PATCHED_FILE_HASHES",
@@ -108,6 +126,20 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             "epochs_trained",
             "protocol_contrasts.csv",
             "worst_case_performance.csv",
+            "protocol_contrasts_cross_split.csv",
+            "worst_case_performance_cross_split.csv",
+            "split_regime_id",
+            "archive_active_split_evidence",
+            "evict_graph_cache",
+            "EXPECTED_PER_SPLIT_RESULTS = 840",
+            "pair_key = ['dataset_id', 'split_id', 'training_seed']",
+            "FULL_MATRIX_ARCHIVE_RESUME",
+            "SMOKE_BYPASS_COMPLETE_MATRIX",
+            "sequential_cache_detected",
+            "results_sha256",
+            "active_config_sha256",
+            "run_fingerprint_sha256",
+            "PRIOR_COMPLETE_MANIFEST_PATH",
         )
         for token in required_tokens:
             with self.subTest(token=token):
@@ -121,6 +153,77 @@ class KaggleNotebookArtifactTests(unittest.TestCase):
             self.all_source,
         )
         self.assertNotIn("SKIPPED:", self.all_source)
+        self.assertNotIn("single-source-v3-r6", self.all_source)
+        self.assertNotIn("gfd-robustness-v3-final-r6", self.all_source)
+        self.assertNotIn("gfd-robustness-v3-report-r6.zip", self.all_source)
+
+    def test_inline_config_exactly_matches_frozen_v4_factorial_config(self) -> None:
+        expected = json.loads(FACTORIAL_CONFIG_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(self.inline_config, expected)
+        validate_config(self.inline_config)
+        sync_notebook(NOTEBOOK_PATH, check=True)
+
+    def test_v4_factorial_design_and_scale_contract(self) -> None:
+        cfg = self.inline_config
+        splits = cfg["data_splits"]
+        self.assertEqual(
+            [
+                (
+                    split["split_id"],
+                    split["split_regime_id"],
+                    split["train_size"],
+                    split["val_size"],
+                    split["split_seed"],
+                )
+                for split in splits
+            ],
+            [
+                ("r40_s0", "train40_val20_test40", 0.4, 0.2, 717),
+                ("r40_s1", "train40_val20_test40", 0.4, 0.2, 1729),
+                ("r40_s2", "train40_val20_test40", 0.4, 0.2, 3253),
+                ("r60_s0", "train60_val20_test20", 0.6, 0.2, 717),
+                ("r60_s1", "train60_val20_test20", 0.6, 0.2, 1729),
+                ("r60_s2", "train60_val20_test20", 0.6, 0.2, 3253),
+            ],
+        )
+        self.assertEqual(cfg["seeds"]["graph_seeds"], [0, 1])
+        self.assertEqual(cfg["seeds"]["training_seeds"], [0, 1, 2, 3, 4])
+        self.assertEqual([model["model_id"] for model in cfg["models"]], ["mlp", "sage", "pmp", "secgfd"])
+        scenarios = {scenario["scenario_id"]: scenario for scenario in cfg["scenarios"]}
+        self.assertTrue(
+            scenarios["heterophily_rewire_nonoracle"]["fixed_feature_partition_across_severity"]
+        )
+        relation = scenarios["camouflage_relation_oracle"]
+        self.assertEqual(
+            (
+                relation["camouflage_edge_degree_ratio"],
+                relation["camouflage_min_edges_per_node"],
+                relation["camouflage_max_edges_per_node"],
+            ),
+            (0.25, 4, 64),
+        )
+        self.assertNotIn("camouflage_edges_per_node", relation)
+        self.assertEqual(scenarios["noise_edges_uniform"]["relation_allocation"], "proportional")
+        self.assertIn("split_bootstrap_by_allocation_regime", cfg["evaluation"]["reporting"])
+        self.assertEqual(cfg["evaluation"]["oracle_perturbation_label_scope"], "all_nodes_including_test")
+
+        ledger_rows = count_graph_variant_rows(cfg)
+        evaluated_states = len(splits) * (
+            1
+            + sum(
+                sum(float(value) > 0 for value in scenario["severity_values"])
+                * len(cfg["seeds"]["graph_seeds"])
+                for scenario in cfg["scenarios"]
+            )
+        )
+        rows_per_model_protocol = evaluated_states * len(cfg["seeds"]["training_seeds"])
+        rows_per_protocol = rows_per_model_protocol * len(cfg["models"])
+        total_rows = rows_per_protocol * 2
+        shift_trainings = len(splits) * len(cfg["seeds"]["training_seeds"]) * len(cfg["models"])
+        self.assertEqual(
+            (ledger_rows, evaluated_states, rows_per_model_protocol, rows_per_protocol, total_rows, shift_trainings),
+            (186, 126, 630, 2520, 5040, 120),
+        )
 
     def test_generated_upstream_sources_are_compiled_and_self_healing(self) -> None:
         patch_cell = next(

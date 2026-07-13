@@ -12,6 +12,7 @@ from benchmark.config import (
     should_export_variant_audit,
     validate_config,
 )
+from benchmark.preflight import count_graph_variant_rows
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +66,7 @@ class FrozenConfigFileTests(unittest.TestCase):
             "exp_yelpchi_v3.json",
             "exp_yelpchi_v3_full.json",
             "exp_yelpchi_v4_multisplit.json",
+            "exp_yelpchi_v4_factorial.json",
         ):
             with self.subTest(config=name):
                 _load_config(name)
@@ -255,6 +257,44 @@ class FrozenConfigFileTests(unittest.TestCase):
         self.assertEqual(relation["camouflage_min_edges_per_node"], 4)
         self.assertEqual(relation["camouflage_max_edges_per_node"], 64)
         self.assertTrue(scenarios["heterophily_rewire_nonoracle"]["fixed_feature_partition_across_severity"])
+        self.assertEqual(scenarios["noise_edges_uniform"]["relation_allocation"], "proportional")
+
+    def test_v4_factorial_config_crosses_allocations_split_graph_and_training_seeds(self) -> None:
+        cfg = _load_config("exp_yelpchi_v4_factorial.json")
+        scenarios = _scenario_map(cfg)
+
+        self.assertEqual(cfg["experiment_name"], "gfd_robustness_benchmark_v4_factorial")
+        self.assertEqual(
+            [
+                (
+                    split["split_regime_id"],
+                    split["split_seed"],
+                    split["train_size"],
+                    split["val_size"],
+                    round(1.0 - split["train_size"] - split["val_size"], 10),
+                )
+                for split in cfg["data_splits"]
+            ],
+            [
+                ("train40_val20_test40", 717, 0.4, 0.2, 0.4),
+                ("train40_val20_test40", 1729, 0.4, 0.2, 0.4),
+                ("train40_val20_test40", 3253, 0.4, 0.2, 0.4),
+                ("train60_val20_test20", 717, 0.6, 0.2, 0.2),
+                ("train60_val20_test20", 1729, 0.6, 0.2, 0.2),
+                ("train60_val20_test20", 3253, 0.6, 0.2, 0.2),
+            ],
+        )
+        self.assertEqual(get_graph_seeds(cfg), [0, 1])
+        self.assertEqual(get_training_seeds(cfg), [0, 1, 2, 3, 4])
+        self.assertEqual(count_graph_variant_rows(cfg), 186)
+        self.assertTrue(
+            scenarios["heterophily_rewire_nonoracle"]["fixed_feature_partition_across_severity"]
+        )
+        relation = scenarios["camouflage_relation_oracle"]
+        self.assertNotIn("camouflage_edges_per_node", relation)
+        self.assertEqual(relation["camouflage_edge_degree_ratio"], 0.25)
+        self.assertEqual(relation["camouflage_min_edges_per_node"], 4)
+        self.assertEqual(relation["camouflage_max_edges_per_node"], 64)
         self.assertEqual(scenarios["noise_edges_uniform"]["relation_allocation"], "proportional")
 
 
