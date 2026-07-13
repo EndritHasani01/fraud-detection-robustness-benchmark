@@ -7,7 +7,7 @@ This document is the report-facing analysis of the executed notebook [`KAGGLE_DU
 The main result is not a single universal robustness winner. It is a set of protocol- and scenario-specific findings:
 
 1. **PMP is the strongest detector in absolute terms in this run.** It has the best clean ROC-AUC, Average Precision (AP), and macro-F1 under both protocols. At maximum configured stress it has the highest AP in 8 of the 10 protocol-by-scenario comparisons.
-2. **Feature camouflage is the broadest consistent failure mode.** Under clean-training shift, maximum feature camouflage reduces AP by about 20.6% to 21.5% for every model. The degradation is also visible in ROC-AUC and macro-F1.
+2. **The configured oracle-selected complete feature replacement is the broadest consistent failure mode.** Under clean-training shift, maximum oracle feature camouflage reduces AP by about 20.6% to 21.5% for every model. The degradation is also visible in ROC-AUC and macro-F1.
 3. **Oracle heterophily exposes the largest protocol interaction.** At severity 0.30, SEC-GFD reaches essentially perfect AP when retrained on the label-constructed graph, but only 0.1570 AP when trained on the clean graph and evaluated on that variant. The paired protocol contrast is +0.8430 AP. This is a privileged-label topology diagnostic, not production robustness.
 4. **PMP remains best on the non-oracle stresses, even when it is not the most invariant.** Under clean-training shift, its AP drops by 0.0783 for non-oracle rewiring and 0.0499 for edge noise, yet its stressed AP remains higher than every alternative.
 5. **The tested relation-camouflage intervention is too weak to answer the intended question.** At maximum severity it changes only +2,003 net edges in an 8.05-million-edge graph and raises the selected fraud-to-normal neighbor ratio by about 0.007. Near-flat performance is therefore inconclusive, not evidence that the models resist relation camouflage.
@@ -15,7 +15,7 @@ The main result is not a single universal robustness winner. It is a set of prot
 7. **GraphSAGE retraining is unstable.** In the train-on-variant protocol, 20 early-stopped runs average 0.2223 AP, while 43 runs reaching 100 epochs average 0.4524 AP. Epoch count and AP correlate at 0.809. This is a strong diagnostic association, not proof that early stopping alone caused the weak mode.
 8. **The run is operationally complete but inferentially small.** All 504 expected rows succeeded, and the corrected summaries respect training-seed/graph-seed pairing. However, there is only one YelpChi split. The intervals are descriptive within-split uncertainty bands, not population-level confidence or formal significance evidence.
 
-> **Report-safe one-sentence conclusion:** On one fixed YelpChi split, PMP was the strongest clean model and usually retained the highest absolute AP under the configured stresses; feature camouflage caused the most consistent degradation, while oracle heterophily revealed a large adaptation-versus-shift interaction whose near-perfect retrained SEC-GFD result is a privileged diagnostic rather than an operational robustness result.
+> **Report-safe one-sentence conclusion:** On one fixed YelpChi split, PMP was the strongest clean model and usually retained the highest absolute AP under the configured stresses; the configured oracle-selected complete feature replacement caused the most consistent degradation, while oracle heterophily revealed a large adaptation-versus-shift interaction whose near-perfect retrained SEC-GFD result is a privileged diagnostic rather than an operational robustness result.
 
 ## 1. Scope, evidence hierarchy, and naming clarification
 
@@ -70,9 +70,9 @@ It does not answer whether one model is universally robust, whether the transfor
 
 The executed notebook contains 90 cells: 66 code cells and 24 Markdown cells. All 66 code cells have unique, sequential execution counts from 1 through 66. No cell contains an error output, and the final packaging cell printed `FINAL_STATUS=complete`.
 
-The run attempt began at `2026-07-12T13:19:57.622327Z` and completed at `2026-07-12T14:14:08.224049Z`, an elapsed time of about 54 minutes 12 seconds including setup, graph preparation, training, reporting, and packaging.
+The manifest run attempt began at `2026-07-12T13:19:57.622327Z` and completed at `2026-07-12T14:14:08.224049Z`, an elapsed time of 54 minutes 10.6 seconds. Measured from the first code-cell input through the final shell reply, the full notebook took 54 minutes 11.95 seconds, including setup, graph preparation, training, reporting, and packaging.
 
-All 22 embedded `benchmark/*.py` notebook bodies match the hashes recorded in the run fingerprint. The setup recorded 13 fresh receipts, and the completed report pipeline recorded 11 stage receipts.
+All 22 embedded `benchmark/*.py` notebook bodies match the hashes recorded in the run fingerprint. The setup recorded 13 fresh receipts, the embedded tests passed 15/15, and both GPU adapter semantic probes succeeded. The completed report pipeline recorded 11 stage receipts.
 
 ### 2.2 Reconstructed experiment matrix
 
@@ -159,7 +159,7 @@ The extracted folder contains the deliberately internal bundle manifest. The ext
 
 ### 2.5 What the light bundle excludes
 
-The report bundle intentionally excludes the 5.32 GiB graph cache, raw dataset cache, isolated Python environment, lane scratch directories, and upstream repository clones. It includes dataset and source hashes plus detailed audit ledgers, but a third party must regenerate the graph binaries to reproduce their physical contents. Absolute `/kaggle/working/...` graph paths in the CSVs are historical provenance, not portable local paths.
+The report bundle intentionally excludes the 5.32 GiB graph cache, raw dataset cache, isolated Python environment, lane scratch directories, and upstream repository clones. Before training, the notebook validated all 21 cached evaluated graphs against their per-graph byte-size and SHA-256 metadata. Both the graph binaries and those metadata files are absent from the light bundle, so a third party can regenerate the logical graphs but cannot compare their byte identity with the executed R6 cache. Absolute `/kaggle/working/...` graph paths in the CSVs are historical provenance, not portable local paths.
 
 ## 3. Dataset, task, and evaluation metrics
 
@@ -206,10 +206,10 @@ That tradeoff is especially important for PMP: the adapter sees one `_E` relatio
 
 | Model | Role and effective configuration |
 |---|---|
-| MLP | Graph-blind negative control; two 128-unit hidden layers, dropout 0.5, Adam at 0.001, weighted cross-entropy, up to 100 epochs, patience 10 |
-| GraphSAGE | Two-layer mean-aggregation baseline; hidden size 64, dropout 0.5, Adam at 0.01, weighted cross-entropy, up to 100 epochs, patience 10 |
-| PMP | Pinned `LASAGE_S` integration; hidden size 48, one message-passing layer, one homogeneous relation, mean aggregation, fanout 10, batch 512, dropout 0, Adam at 0.01, 100 epochs, patience 10, `num_workers=0`; only train labels exposed through `label_unk` |
-| SEC-GFD | Hidden size 32, spectral order 2, high-order term 1, constraint weight 0.2, Adam at 0.01, weight decay 0, 50 epochs, patience 10 |
+| MLP | Graph-blind negative control; two 128-unit hidden layers, dropout 0.5, Adam at 0.001, weight decay 0.0005, weighted cross-entropy, up to 100 epochs, patience 10 |
+| GraphSAGE | Full-graph/full-batch two-layer mean-aggregation baseline; hidden size 64, dropout 0.5, Adam at 0.01, weight decay 0.0005, weighted cross-entropy, up to 100 epochs, patience 10 |
+| PMP | Pinned `LASAGE_S` integration; hidden size 48, one message-passing layer, one homogeneous relation, incoming-neighbor sampling with mean aggregation, fanout 10, batch 512, dropout 0, Adam at 0.01, weight decay 0, 100 epochs, patience 10, `num_workers=0`; only train labels exposed through `label_unk` |
+| SEC-GFD | Hidden size 32, spectral order 2, high-order term 1, class-weighted cross-entropy plus 0.2× the repaired contrastive-like loss, Adam at 0.01, weight decay 0, 50 epochs, patience 10 |
 
 PMP is pinned to upstream commit `3f7629f6c180891a0bc1bba3c66d94d288a1ddae`. Its compatibility patch replaces unavailable PyG normalization classes with identity modules. SEC-GFD is pinned to `97faa51145ed1fbcbdc67cc5d399490da9a9797a`; its compatibility patch permits zero-in-degree nodes. The SEC-GFD adapter also repairs the auxiliary-loss training indices and maps cosine similarity from `[-1, 1]` to `[0, 1]` before its positive log-ratio. These are disclosed correctness/integration changes, so the results must not be presented as exact paper reproductions.
 
@@ -235,7 +235,7 @@ The two non-oracle scenario families use `claim_scope=non_oracle_controlled_stre
 | `heterophily_rewire_oracle` | 0.15, 0.30 | Rewire selected destinations to opposite true-label nodes | Yes | Controlled true-label heterophily |
 | `heterophily_rewire_nonoracle` | 0.15, 0.30 | Two-means feature partition, then rewire toward pseudo-opposite nodes | No | Label-free structural disagreement proxy |
 | `camouflage_feature_oracle` | 0.15, 0.30 | Replace selected fraud features with sampled normal features, `gamma=1` | Yes | Feature camouflage |
-| `camouflage_relation_oracle` | 0.15, 0.30 | Add two normal-looking relations and remove one suspicious relation per selected fraud node | Yes | Relation camouflage |
+| `camouflage_relation_oracle` | 0.15, 0.30 | Add two normal-looking edges and remove one suspicious edge per selected fraud node, within existing relation types | Yes | Relation camouflage |
 | `noise_edges_uniform` | 0.10, 0.20 | Add directed random edges approximately uniformly across source relations | No | Density/noisy-neighborhood stress |
 
 Nominal severity has different units and causal meaning in every family. A value of 0.30 in feature camouflage cannot be treated as equivalent to 0.30 in rewiring. All comparisons must remain within a scenario and be paired with the realized audit.
@@ -292,7 +292,7 @@ The within-split bootstrap bands are useful for showing seed sensitivity, partic
 | Non-oracle rewiring | 2,415,404 rewired edges | True-label heterophily 0.22688 → 0.23198, shift +0.00510 | Strong structural edit, weak named target |
 | Feature camouflage | 2,003 fraud nodes replaced | Cosine to sampled normal 0.83979 → 1.00000; mean L2 change ≈2.241 | Strong feature intervention |
 | Relation camouflage | 2,003 fraud nodes; +4,006 and −2,003 edges | Local fraud-to-normal ratio 0.81385 → 0.82088, shift +0.00703 | Underpowered for broad robustness claims |
-| Uniform noise | 1,610,269 added directed edge pairs | Edge count +20%; heterophily 0.22688 → 0.23041 | Strong density intervention, weak heterophily change |
+| Uniform noise | 1,610,269 added directed edges | Edge count +20%; heterophily 0.22688 → 0.23041 | Strong density intervention, weak heterophily change |
 
 All requested counts were realized exactly. Exact count realization, however, is not the same as construct validity.
 
@@ -310,7 +310,7 @@ The frozen config seeds the feature partition with severity, so the higher-sever
 
 The accurate interpretation is **feature-partition-driven rewiring stress**, not successful strong true-label heterophily stress.
 
-### 6.4 Feature camouflage
+### 6.4 Oracle-selected complete feature camouflage
 
 At severity 0.15, 1,001 fraud nodes are changed; at 0.30, 2,003 are changed. With `gamma=1`, each selected fraud feature vector is completely replaced by a sampled normal feature vector, which explains the post-change cosine similarity of exactly 1.0 to that sampled normal.
 
@@ -344,6 +344,8 @@ Mean ± empirical sample standard deviation over three training seeds:
 | Train clean, evaluate all | SEC-GFD | 0.8141 ± 0.0038 | 0.4755 ± 0.0006 | 0.6897 ± 0.0041 |
 
 PMP leads every clean metric under both protocols. SEC-GFD is second in AP, GraphSAGE third, and MLP fourth.
+
+The clean-training-shift descriptive AP intervals are `[0.3362, 0.4321]` for MLP, `[0.4118, 0.4365]` for GraphSAGE, `[0.5522, 0.5757]` for PMP, and `[0.4751, 0.4762]` for SEC-GFD. With only three training seeds, these bands primarily show the observed seed range rather than precise population uncertainty.
 
 Relative to the 0.1453 fraud prevalence, the clean shift AP values are approximately 3.91× prevalence for PMP, 3.27× for SEC-GFD, 2.94× for GraphSAGE, and 2.75× for MLP.
 
@@ -397,13 +399,13 @@ At severity 0.30:
 | PMP | 0.6018 | 0.3859 | +0.2159 | [0.1508, 0.2611] |
 | SEC-GFD | 1.0000 | 0.1570 | +0.8430 | [0.8272, 0.8641] |
 
-SEC-GFD’s clean-trained maximum-stress ROC-AUC/AP/macro-F1 are approximately `0.5237 / 0.1570 / 0.5030`, close to random ranking and classification. After retraining they are essentially `1.0000 / 1.0000 / 0.9998`.
+SEC-GFD’s clean-trained maximum-stress ROC-AUC/AP/macro-F1 are approximately `0.5237 / 0.1570 / 0.5030`. ROC-AUC and AP are near their random-ranking references, while macro-F1 is weak but has no universal random baseline because it depends on prevalence, predictions, and the selected threshold. After retraining the three metrics are essentially `1.0000 / 1.0000 / 0.9998`.
 
 The oracle graph is not merely “more difficult.” Rewiring every selected edge toward an opposite-label destination creates a highly regular label-dependent topology. A model trained on that topology can exploit it; a clean-trained model encounters a major structural regime change. The result is scientifically useful as an adaptation/shift diagnostic, but it cannot be interpreted as realistic adversarial robustness or as a fair operational victory for SEC-GFD.
 
-### 9.2 Feature camouflage: the most consistent degradation
+### 9.2 Oracle-selected complete feature replacement: the most consistent degradation
 
-Under clean-training shift, maximum feature camouflage produces remarkably similar relative AP losses:
+Under clean-training shift, the maximum configured oracle feature-camouflage diagnostic (`gamma=1`) produces remarkably similar relative AP losses:
 
 | Model | Absolute AP drop | Relative AP loss | Paired drop interval |
 |---|---:|---:|---:|
@@ -429,7 +431,7 @@ PMP is less invariant in absolute drop than GraphSAGE or SEC-GFD, yet it remains
 
 With retraining, PMP and SEC-GFD score 0.5094 and 0.4842 AP, while GraphSAGE falls to 0.3469 with high seed variability. Because the pseudo-label partition itself changes across severity, the small improvement in GraphSAGE from 0.3196 at severity 0.15 to 0.3469 at 0.30 is not evidence that more stress helps.
 
-### 9.4 Relation camouflage: statistically tiny changes are scientifically inconclusive
+### 9.4 Relation camouflage: numerically tiny changes are scientifically inconclusive
 
 Clean-training shift is nearly flat:
 
@@ -491,7 +493,7 @@ Cells are `stressed ROC-AUC (clean minus stress drop)`.
 | Shift / relation camouflage | 0.6532 (+0.0000) | 0.6695 (+0.0002) | **0.7191 (+0.0006)** | 0.6903 (−0.0006) |
 | Shift / uniform noise | 0.6532 (+0.0000) | 0.6643 (+0.0055) | **0.7011 (+0.0186)** | 0.6872 (+0.0025) |
 
-The threshold-free and thresholded metrics tell the same broad story: feature camouflage degrades every model; PMP is usually strongest in absolute performance; and SEC-GFD’s oracle heterophily result reverses across protocols.
+The threshold-free and thresholded metrics tell the same broad story: the configured oracle-selected complete feature replacement degrades every model; PMP is usually strongest in absolute performance; and SEC-GFD’s oracle heterophily result reverses across protocols.
 
 ## 11. Direct paired protocol contrasts
 
@@ -667,6 +669,19 @@ This supports the stability of the high-level story while also demonstrating why
 
 The isolated environment used Python 3.11.15, PyTorch 2.1.0+cu118, DGL 1.1.3+cu118, and NumPy 1.26.4 on two Tesla T4 GPUs with 15,360 MiB each. The host exposed about 31.35 GiB RAM.
 
+Non-training stage evidence:
+
+| Stage/resource | Observed value |
+|---|---:|
+| Graph-generation benchmark | 134.67 s |
+| Graph generation plus validation cell | 152.03 s |
+| CUDA smoke matrix | 8.88 s |
+| Plot/report generation | 78.87 s |
+| Free disk at start | 19.502 GiB |
+| Free disk after isolated setup | 14.157 GiB |
+| Free disk after graph generation | 8.485 GiB |
+| Graph cache | 5,714,978,057 bytes (5.323 GiB) |
+
 | Lane | Protocol | Duration |
 |---|---|---:|
 | PMP | Train on variant | 2,657.99 s (44.30 min) |
@@ -686,7 +701,7 @@ The correct comparison to the papers in [`Paper_Summary.md`](Paper_Summary.md) i
 
 ### CARE-GNN
 
-CARE-GNN motivates the distinction between feature and relation camouflage. R6 strongly supports the importance of feature camouflage: every evaluated model degrades. It does not answer whether CARE-GNN would solve the problem because CARE-GNN was not integrated. The weak realized relation intervention also means the CARE-GNN-style relation-camouflage question remains open.
+CARE-GNN motivates the distinction between feature and relation camouflage. R6 shows that every evaluated model degrades under the configured oracle-selected complete feature replacement. It does not establish vulnerability to every form of feature camouflage and does not answer whether CARE-GNN would solve the problem because CARE-GNN was not integrated. The weak realized relation intervention also means the CARE-GNN-style relation-camouflage question remains open.
 
 ### PMP
 
@@ -756,7 +771,7 @@ Risks:
 
 ### 18.5 Reproducibility boundary
 
-The light bundle provides strong logical provenance but omits physical graph binaries and the exact external post-ZIP manifest. Reproduction requires downloading the pinned YelpChi source, rebuilding the graph cache with the embedded code/config, and accepting that CUDA may not be bit-identical.
+The light bundle provides strong logical provenance but omits physical graph binaries, their per-graph metadata, and the exact external post-ZIP manifest. The notebook verified all 21 executed graph files against byte-size/SHA metadata before training, but an external auditor cannot compare regenerated bytes with that absent R6 cache. Reproduction therefore requires downloading the pinned YelpChi source, rebuilding logical graphs with the embedded code/config, and accepting that CUDA may not be bit-identical.
 
 ## 19. Supported and unsupported claims
 
@@ -765,7 +780,7 @@ The light bundle provides strong logical provenance but omits physical graph bin
 - R6 completed all 504 configured evaluations without missing or error rows.
 - PMP had the best clean ROC-AUC, AP, and macro-F1 in this fixed-split run.
 - PMP had the highest maximum-stress AP in 8 of 10 protocol/scenario comparisons.
-- Feature camouflage consistently reduced all three metrics for all four models.
+- The configured oracle-selected complete feature replacement consistently reduced all three metrics for all four models.
 - PMP remained the highest-AP model under every non-oracle maximum-stress comparison.
 - Oracle heterophily produced a very large adaptation-versus-shift interaction, especially for SEC-GFD.
 - GraphSAGE’s matched-retraining performance was unstable and strongly associated with stopping behavior.
@@ -867,14 +882,14 @@ The most defensible narrative is:
 2. Existing methods attack different parts of this problem, so clean-paper scores do not form a shared robustness benchmark.
 3. This project contributes a common, auditable harness with deterministic stress generation, two protocol semantics, four integrated models, realized-stress auditing, and unified metrics.
 4. PMP is the strongest absolute detector in the observed run, but robustness depends on whether one values absolute stressed performance, retention, matched adaptation, or unseen-shift stability.
-5. Feature camouflage is the clearest shared failure mode.
+5. The configured oracle-selected complete feature replacement is the clearest shared failure mode.
 6. Oracle heterophily demonstrates why protocol and label-access scope fundamentally change interpretation.
 7. Weak relation camouflage and feature-partition rewiring show why perturbation audits are as important as model metrics.
 8. One split and homogeneous adapters constrain generalization; the next contribution should be confirmatory multi-split and native-view evaluation rather than a broader but less valid model zoo.
 
 ## 23. Conclusion
 
-R6 is a complete, traceable, and methodologically improved execution of the v3 YelpChi robustness benchmark. Its strongest empirical conclusion is that PMP combines the best clean performance with the best absolute AP under most configured stresses. Its strongest failure-mode conclusion is that direct feature camouflage harms every model. Its most revealing diagnostic is the SEC-GFD oracle heterophily reversal: nearly perfect matched retraining and near-random clean-training shift.
+R6 is a complete, traceable, and methodologically improved execution of the v3 YelpChi robustness benchmark. Its strongest empirical conclusion is that PMP combines the best clean performance with the best absolute AP under most configured stresses. Its strongest failure-mode conclusion is that the configured oracle-selected complete feature replacement harms every model. Its most revealing diagnostic is the SEC-GFD oracle heterophily reversal: nearly perfect matched retraining and near-random ranking by ROC-AUC/AP under clean-training shift.
 
 Equally important, the audit prevents overclaiming. Relation camouflage was too weak, non-oracle rewiring barely changed true-label heterophily, oracle topology used labels across the full graph, and one split cannot establish general rankings. The final report should therefore present R6 as controlled fixed-split evidence and a demonstration of why robustness benchmarks need protocol separation, perturbation-fidelity audits, seed-aware pairing, and explicit claim scope.
 
