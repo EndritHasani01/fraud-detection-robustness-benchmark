@@ -1,0 +1,1068 @@
+{
+  "created_utc": "2026-07-13T09:36:20.520526+00:00",
+  "notebook_implementation_id": "single-source-v4-factorial-r1-2026-07-13",
+  "run_attempt_id": "2026-07-13T09:34:22.166281+00:00",
+  "setup_receipts": {
+    "preflight": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:34:22.328403+00:00",
+      "evidence": {
+        "gpu_count": 2,
+        "ram_gib": 31.348,
+        "disk_free_gib": 19.502,
+        "disk_total_gib": 19.518,
+        "complete_cache_detected": false,
+        "sequential_cache_detected": false
+      }
+    },
+    "venv": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:34:24.850317+00:00",
+      "evidence": {
+        "python_version": "3.11.15 (main, May 10 2026, 19:28:18) [Clang 22.1.3 ]",
+        "uv_version": "uv 0.11.13 (x86_64-unknown-linux-gnu)"
+      }
+    },
+    "packages": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:35:55.143847+00:00",
+      "evidence": {
+        "torch": "2.1.0+cu118",
+        "dgl": "1.1.3+cu118",
+        "nvidia_cuda_runtime_cu11": "11.8.89",
+        "nvidia_cusparse_cu11": "11.7.5.86",
+        "cudart_files": [
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0"
+        ],
+        "cusparse_files": [
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cusparse/lib/libcusparse.so.11"
+        ],
+        "native_libraries": [
+          {
+            "component": "cuda_runtime",
+            "path": "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0",
+            "bytes": 679264,
+            "sha256": "d0da41ae1323cf4eeb610123d69d7714124cfe5ebfcc4e45f02b910e51c57ee6"
+          },
+          {
+            "component": "cusparse",
+            "path": "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cusparse/lib/libcusparse.so.11",
+            "bytes": 279899536,
+            "sha256": "8c7d6b64b4c4722420dfaed9e1700a2a01b35fe196ce9335cf266da0187de1f3"
+          }
+        ]
+      }
+    },
+    "native_linker": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:35:58.004864+00:00",
+      "evidence": {
+        "dgl_library": "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/dgl/libdgl.so",
+        "dgl_library_sha256": "fc5f16a186029879c83e6d18ece0b063f7a6b0c8326457e6f2e1efa4c1f6d6d0",
+        "cuda_library_dirs": [
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/torch/lib",
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cuda_runtime/lib",
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cusparse/lib"
+        ],
+        "cudart_files": [
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0"
+        ],
+        "cusparse_files": [
+          "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cusparse/lib/libcusparse.so.11"
+        ],
+        "ldd_output": "\tlinux-vdso.so.1 (0x00007cbefaf5e000)\n\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007cbefaf43000)\n\tlibrt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007cbefaf3e000)\n\tlibcudart.so.11.0 => /kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cuda_runtime/lib/libcudart.so.11.0 (0x00007cbee4000000)\n\tlibcublas.so.11 => /kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/torch/lib/libcublas.so.11 (0x00007cbede200000)\n\tlibcusparse.so.11 => /kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cusparse/lib/libcusparse.so.11 (0x00007cbecd400000)\n\tlibgomp.so.1 => /lib/x86_64-linux-gnu/libgomp.so.1 (0x00007cbefaef2000)\n\tlibpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007cbefaeed000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007cbecd1d4000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007cbefae06000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007cbefade6000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007cbeccfab000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007cbefaf60000)\n\tlibcublasLt.so.11 => /kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/torch/lib/libcublasLt.so.11 (0x00007cbea8a00000)\n"
+      }
+    },
+    "post_setup_disk": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:35:58.471964+00:00",
+      "evidence": {
+        "runtime_gib": 5.33,
+        "disk_free_gib": 14.157
+      }
+    },
+    "upstreams": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:35:59.390785+00:00",
+      "evidence": {
+        "pmp": "3f7629f6c180891a0bc1bba3c66d94d288a1ddae",
+        "secgfd": "97faa51145ed1fbcbdc67cc5d399490da9a9797a"
+      }
+    },
+    "upstream_patches": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:04.251189+00:00",
+      "evidence": {
+        "pmp": {
+          "diff_sha256": "2b8acfbdf10a389b4801ebbdc0c71c659ae07efbf83fbe7ca4ac0867e4349586",
+          "patched_file_hashes": {
+            "model/LASAGE_S.py": "564ce5bf10c16e21c20f3fb2eeaf1fa67cfd9f0664b6eeb4e314c283c74946f4",
+            "model/base.py": "b71917eecea18555a526cb3cdb3391d5d1ff357b365bc377e1c24d6c3b87cbbb"
+          },
+          "semantic_probe": {
+            "model_class": "LASAGE_S",
+            "graph_norm_class": "Identity",
+            "graph_size_norm_class": "Identity",
+            "shape": [
+              3,
+              4
+            ]
+          }
+        },
+        "secgfd": {
+          "diff_sha256": "09749601bb7ccdf2bb29db2d6002eddfd44a68815999bb90ba6a4d2e783a8b4c",
+          "patched_file_hashes": {
+            "model/SECGFD.py": "3599bc1b12d7628b2cb2868346f78f5dd7499eb29f76066f7eb5e7917cc4530e"
+          },
+          "semantic_probe": {
+            "model_class": "SECGFD",
+            "gcn_shape": [
+              3,
+              2
+            ],
+            "zero_in_degree_nodes": 2
+          }
+        }
+      }
+    },
+    "config": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:04.262972+00:00",
+      "evidence": {
+        "path": "/kaggle/working/fraud-notebook-source/notebook_config.json"
+      }
+    },
+    "embedded_modules": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:04.831200+00:00",
+      "evidence": {
+        "count": 22
+      }
+    },
+    "cuda_runtime": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:10.359887+00:00",
+      "evidence": {
+        "physical_gpus": [
+          0,
+          1
+        ]
+      }
+    },
+    "adapters": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:16.569341+00:00",
+      "evidence": {
+        "pmp": {
+          "model_class": "LASAGE_S",
+          "device": "cuda",
+          "logical_gpu_count": 1,
+          "relations": [
+            "_E"
+          ],
+          "output_shape": [
+            8,
+            2
+          ],
+          "loss": 0.7182830572128296,
+          "parameter_count": 3699,
+          "finite_gradient_tensors": 18,
+          "singleton_eval_rows": 1
+        },
+        "secgfd": {
+          "model_class": "SECGFD",
+          "device": "cuda",
+          "logical_gpu_count": 1,
+          "zero_in_degree_nodes": 1,
+          "output_shape": [
+            8,
+            2
+          ],
+          "embedding_shape": [
+            8,
+            4
+          ],
+          "loss": 0.7018054127693176,
+          "parameter_count": 5702,
+          "finite_gradient_tensors": 12
+        }
+      }
+    },
+    "tests": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:20.137308+00:00",
+      "evidence": {
+        "return_code": 0,
+        "passed": 16
+      }
+    },
+    "experiment_scale": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T09:36:20.213208+00:00",
+      "evidence": {
+        "ledger_rows": 186,
+        "total_result_rows": 5040,
+        "allocation_regimes": [
+          "train40_val20_test40",
+          "train60_val20_test20"
+        ]
+      }
+    }
+  },
+  "run_fingerprint_sha256": "e419afb9dcdffa3c922c355b3964e9d06e54164b7bcef01646262a7c2814dd41",
+  "run_fingerprint_components": {
+    "notebook_implementation_id": "single-source-v4-factorial-r1-2026-07-13",
+    "config_sha256": "77d2215791b18233b2ba3b079431ac09941e0e7528c934649e9793b64245b909",
+    "embedded_module_hashes": {
+      "benchmark/__init__.py": "008eb53bd5017dc14bb632686bcdde16fb115192c4285102d6ef4ddc2f5b1136",
+      "benchmark/baselines.py": "8aeee8545234df3e92e25ee6a0e4af8a8df93509266c8ee943ad8ade5081a7a5",
+      "benchmark/baselines_stage.py": "263138ebd969bf90538d546015784783ec7fbdd8e956a1d77b57d9f2b28354ed",
+      "benchmark/cache.py": "69269d90d92a003f0e71f9ba72e0ff6622f5074b326dfee9b39aafa3c5cfc5c4",
+      "benchmark/config.py": "5bfe7d705fe6c82e0dbaa68c22b0a7703f945ba089c018370eee30357970e5eb",
+      "benchmark/data.py": "9366cc804a771ee3b92a87743c09ec0af11d79a0ad4064bcf204a48c717f1c46",
+      "benchmark/matrix_stage.py": "4a1c6f4d7f37625bdbc33ea038d9664d3465c70ea5ad55f91b3ce442b8a407dc",
+      "benchmark/metrics.py": "0c45acec57f93e0a076cea2130bc2a8176b3f48d7dcb32d4bfb0dc188deff3d2",
+      "benchmark/paths.py": "2dcf4fd63883831422fb7ad2efcb9c669ecb4bda33f9a269d2f528a0805e4d1f",
+      "benchmark/plots_stage.py": "42a8ccc21c7712b14bdd115ba6bb3d3365f6c1d3464ec2843ec4207c2a5b264f",
+      "benchmark/pmp_stage.py": "f26bb909c7b2e381b38d8a037bdfef711beafb8778f1882405002c2ea131dae0",
+      "benchmark/preflight.py": "a002626d41e3ccdc5e0ed3b3289145b8e99b1c0f9bdacd12d1044c699594bfff",
+      "benchmark/relation_utils.py": "af6bc1c7e1af41a1c0bb12dd5e7f6ece12a9bfca8ee56c63f10acc3550040477",
+      "benchmark/results.py": "9cf5740eb6e9a33ad111020ded3a6dd7f455bc8e2722339528d2f6bd9046b4b7",
+      "benchmark/run.py": "ef0ca86b4691fcadcac9ed6a87d06e673018ddf349a681d860b656603fa2df41",
+      "benchmark/scenario_audit.py": "6fc4de26503b77cfc83f02a76cbf850fdf2116dbb692d5ea2d460274f0b4ae20",
+      "benchmark/scenarios.py": "ad43d9e4453e0bcbd60018eaac72d13a86569bac5dc6536567440487818861f0",
+      "benchmark/secgfd_stage.py": "d4dcb37c610a07e0c3cf2674a43234bac1f65150caee4af38b068851b20e7d34",
+      "benchmark/shift_stage.py": "552dd429c5672d704dc85d3175b0be4369c584d0245808f30851342fad657d49",
+      "benchmark/stats.py": "2b55e2fa42a327365412e28690281e5e1c359ab207b99a7b86b6b9a1aeb8f386",
+      "benchmark/summarize.py": "072d496929675b2d4caa43a05dd9e78eeb5cc5b1a51ac8676f7e7a7b7c6bc816",
+      "benchmark/variants.py": "acc7dfb5fc1d18147a1dc3965df01be8cf79bb3e9f915e5f1d706bf1a5cc3184"
+    },
+    "active_upstreams": {
+      "pmp": {
+        "url": "https://github.com/Xtra-Computing/PMP",
+        "commit": "3f7629f6c180891a0bc1bba3c66d94d288a1ddae"
+      },
+      "secgfd": {
+        "url": "https://github.com/Sunxkissed/SEC-GFD",
+        "commit": "97faa51145ed1fbcbdc67cc5d399490da9a9797a"
+      }
+    },
+    "upstream_patch_sha256": {
+      "pmp": "2b8acfbdf10a389b4801ebbdc0c71c659ae07efbf83fbe7ca4ac0867e4349586",
+      "secgfd": "09749601bb7ccdf2bb29db2d6002eddfd44a68815999bb90ba6a4d2e783a8b4c"
+    },
+    "upstream_patched_file_hashes": {
+      "pmp": {
+        "model/LASAGE_S.py": "564ce5bf10c16e21c20f3fb2eeaf1fa67cfd9f0664b6eeb4e314c283c74946f4",
+        "model/base.py": "b71917eecea18555a526cb3cdb3391d5d1ff357b365bc377e1c24d6c3b87cbbb"
+      },
+      "secgfd": {
+        "model/SECGFD.py": "3599bc1b12d7628b2cb2868346f78f5dd7499eb29f76066f7eb5e7917cc4530e"
+      }
+    },
+    "isolated_package_freeze": [
+      "certifi==2026.6.17",
+      "charset-normalizer==3.4.9",
+      "contourpy==1.3.3",
+      "cycler==0.12.1",
+      "dgl==1.1.3+cu118",
+      "filelock==3.29.0",
+      "fonttools==4.63.0",
+      "fsspec==2026.4.0",
+      "idna==3.18",
+      "iniconfig==2.3.0",
+      "Jinja2==3.1.6",
+      "kiwisolver==1.5.0",
+      "MarkupSafe==3.0.3",
+      "matplotlib==3.9.2",
+      "mpmath==1.3.0",
+      "networkx==3.6.1",
+      "numpy==1.26.4",
+      "nvidia-cuda-runtime-cu11 @ https://download.pytorch.org/whl/cu118/nvidia_cuda_runtime_cu11-11.8.89-py3-none-manylinux1_x86_64.whl#sha256=f587bd726eb2f7612cf77ce38a2c1e65cf23251ff49437f6161ce0d647f64f7c",
+      "nvidia-cusparse-cu11 @ https://download.pytorch.org/whl/cu118/nvidia_cusparse_cu11-11.7.5.86-py3-none-manylinux1_x86_64.whl#sha256=4ae709fe78d3f23f60acaba8c54b8ad556cf16ca486e0cc1aa92dca7555d2d2b",
+      "packaging==26.2",
+      "pandas==2.2.3",
+      "pillow==12.3.0",
+      "pluggy==1.6.0",
+      "psutil==7.2.2",
+      "pyparsing==3.3.2",
+      "pytest==8.3.5",
+      "python-dateutil==2.9.0.post0",
+      "pytz==2026.2",
+      "PyYAML==6.0.2",
+      "requests==2.34.2",
+      "scipy==1.11.4",
+      "six==1.17.0",
+      "sympy==1.12",
+      "torch==2.1.0+cu118",
+      "tqdm==4.67.1",
+      "triton==2.1.0",
+      "typing_extensions==4.15.0",
+      "tzdata==2026.3",
+      "urllib3==2.7.0"
+    ],
+    "isolated_runtime": [
+      {
+        "torch": "2.1.0+cu118",
+        "dgl": "1.1.3+cu118",
+        "numpy": "1.26.4",
+        "logical_device_count": 1,
+        "gpu_name": "Tesla T4",
+        "graph_device": "cuda:0",
+        "aggregation_sum": 2000.0,
+        "physical_gpu": 0
+      },
+      {
+        "torch": "2.1.0+cu118",
+        "dgl": "1.1.3+cu118",
+        "numpy": "1.26.4",
+        "logical_device_count": 1,
+        "gpu_name": "Tesla T4",
+        "graph_device": "cuda:0",
+        "aggregation_sum": 2000.0,
+        "physical_gpu": 1
+      }
+    ],
+    "uv_version": "uv 0.11.13 (x86_64-unknown-linux-gnu)",
+    "gpus_and_driver": [
+      {
+        "index": 0,
+        "name": "Tesla T4",
+        "memory_mib": 15360,
+        "driver": "580.159.04"
+      },
+      {
+        "index": 1,
+        "name": "Tesla T4",
+        "memory_mib": 15360,
+        "driver": "580.159.04"
+      }
+    ]
+  },
+  "run_status": "complete",
+  "current_project_repo_downloaded": false,
+  "embedded_module_hashes": {
+    "benchmark/__init__.py": "008eb53bd5017dc14bb632686bcdde16fb115192c4285102d6ef4ddc2f5b1136",
+    "benchmark/baselines.py": "8aeee8545234df3e92e25ee6a0e4af8a8df93509266c8ee943ad8ade5081a7a5",
+    "benchmark/baselines_stage.py": "263138ebd969bf90538d546015784783ec7fbdd8e956a1d77b57d9f2b28354ed",
+    "benchmark/cache.py": "69269d90d92a003f0e71f9ba72e0ff6622f5074b326dfee9b39aafa3c5cfc5c4",
+    "benchmark/config.py": "5bfe7d705fe6c82e0dbaa68c22b0a7703f945ba089c018370eee30357970e5eb",
+    "benchmark/data.py": "9366cc804a771ee3b92a87743c09ec0af11d79a0ad4064bcf204a48c717f1c46",
+    "benchmark/matrix_stage.py": "4a1c6f4d7f37625bdbc33ea038d9664d3465c70ea5ad55f91b3ce442b8a407dc",
+    "benchmark/metrics.py": "0c45acec57f93e0a076cea2130bc2a8176b3f48d7dcb32d4bfb0dc188deff3d2",
+    "benchmark/paths.py": "2dcf4fd63883831422fb7ad2efcb9c669ecb4bda33f9a269d2f528a0805e4d1f",
+    "benchmark/plots_stage.py": "42a8ccc21c7712b14bdd115ba6bb3d3365f6c1d3464ec2843ec4207c2a5b264f",
+    "benchmark/pmp_stage.py": "f26bb909c7b2e381b38d8a037bdfef711beafb8778f1882405002c2ea131dae0",
+    "benchmark/preflight.py": "a002626d41e3ccdc5e0ed3b3289145b8e99b1c0f9bdacd12d1044c699594bfff",
+    "benchmark/relation_utils.py": "af6bc1c7e1af41a1c0bb12dd5e7f6ece12a9bfca8ee56c63f10acc3550040477",
+    "benchmark/results.py": "9cf5740eb6e9a33ad111020ded3a6dd7f455bc8e2722339528d2f6bd9046b4b7",
+    "benchmark/run.py": "ef0ca86b4691fcadcac9ed6a87d06e673018ddf349a681d860b656603fa2df41",
+    "benchmark/scenario_audit.py": "6fc4de26503b77cfc83f02a76cbf850fdf2116dbb692d5ea2d460274f0b4ae20",
+    "benchmark/scenarios.py": "ad43d9e4453e0bcbd60018eaac72d13a86569bac5dc6536567440487818861f0",
+    "benchmark/secgfd_stage.py": "d4dcb37c610a07e0c3cf2674a43234bac1f65150caee4af38b068851b20e7d34",
+    "benchmark/shift_stage.py": "552dd429c5672d704dc85d3175b0be4369c584d0245808f30851342fad657d49",
+    "benchmark/stats.py": "2b55e2fa42a327365412e28690281e5e1c359ab207b99a7b86b6b9a1aeb8f386",
+    "benchmark/summarize.py": "072d496929675b2d4caa43a05dd9e78eeb5cc5b1a51ac8676f7e7a7b7c6bc816",
+    "benchmark/variants.py": "acc7dfb5fc1d18147a1dc3965df01be8cf79bb3e9f915e5f1d706bf1a5cc3184"
+  },
+  "active_upstreams": {
+    "pmp": {
+      "url": "https://github.com/Xtra-Computing/PMP",
+      "commit": "3f7629f6c180891a0bc1bba3c66d94d288a1ddae"
+    },
+    "secgfd": {
+      "url": "https://github.com/Sunxkissed/SEC-GFD",
+      "commit": "97faa51145ed1fbcbdc67cc5d399490da9a9797a"
+    }
+  },
+  "upstream_patch_diffs": {
+    "pmp": {
+      "sha256": "2b8acfbdf10a389b4801ebbdc0c71c659ae07efbf83fbe7ca4ac0867e4349586",
+      "diff": "diff --git a/model/LASAGE_S.py b/model/LASAGE_S.py\nindex 897e5f5..c5e4d53 100644\n--- a/model/LASAGE_S.py\n+++ b/model/LASAGE_S.py\n@@ -9,7 +9,11 @@ import math\n from dgl.utils import check_eq_shape, expand_as_pair\n from dgl.utils import check_eq_shape, expand_as_pair\n from dgl.base import DGLError\n-from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm\n+try:\n+    from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm\n+except ImportError:\n+    GraphNorm = nn.Identity\n+    GraphSizeNorm = nn.Identity\n from torch import Tensor\n from .base import MLP\n class LISeq(nn.Module):\ndiff --git a/model/base.py b/model/base.py\nindex 60ee145..c76e6d3 100644\n--- a/model/base.py\n+++ b/model/base.py\n@@ -1,6 +1,10 @@\n import torch.nn as nn\n import torch\n-from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm\n+try:\n+    from torch_geometric.nn.norm import GraphNorm, GraphSizeNorm\n+except ImportError:\n+    GraphNorm = nn.Identity\n+    GraphSizeNorm = nn.Identity\n from torch import Tensor\n import math\n from torch.nn import functional as F\n"
+    },
+    "secgfd": {
+      "sha256": "09749601bb7ccdf2bb29db2d6002eddfd44a68815999bb90ba6a4d2e783a8b4c",
+      "diff": "diff --git a/model/SECGFD.py b/model/SECGFD.py\nindex 57417f7..d8bc469 100644\n--- a/model/SECGFD.py\n+++ b/model/SECGFD.py\n@@ -11,8 +11,8 @@ import dgl\n class GCN(nn.Module):\n     def __init__(self, in_dim, hid_dim, out_dim, g):\n         super(GCN, self).__init__()\n-        self.conv1 = GraphConv(in_dim, hid_dim)\n-        self.conv2 = GraphConv(hid_dim, out_dim)\n+        self.conv1 = GraphConv(in_dim, hid_dim, allow_zero_in_degree=True)\n+        self.conv2 = GraphConv(hid_dim, out_dim, allow_zero_in_degree=True)\n         self.act = nn.ReLU()\n         self.g = g\n \n"
+    }
+  },
+  "config_path": "notebook_config.json",
+  "config_sha256": "77d2215791b18233b2ba3b079431ac09941e0e7528c934649e9793b64245b909",
+  "experiment_name": "gfd_robustness_benchmark_v4_factorial",
+  "host_python": "3.12.13 (main, Mar  4 2026, 09:23:07) [GCC 11.4.0]",
+  "host_platform": "Linux-6.12.90+-x86_64-with-glibc2.35",
+  "isolated_runtime": [
+    {
+      "torch": "2.1.0+cu118",
+      "dgl": "1.1.3+cu118",
+      "numpy": "1.26.4",
+      "logical_device_count": 1,
+      "gpu_name": "Tesla T4",
+      "graph_device": "cuda:0",
+      "aggregation_sum": 2000.0,
+      "physical_gpu": 0
+    },
+    {
+      "torch": "2.1.0+cu118",
+      "dgl": "1.1.3+cu118",
+      "numpy": "1.26.4",
+      "logical_device_count": 1,
+      "gpu_name": "Tesla T4",
+      "graph_device": "cuda:0",
+      "aggregation_sum": 2000.0,
+      "physical_gpu": 1
+    }
+  ],
+  "isolated_package_freeze": [
+    "certifi==2026.6.17",
+    "charset-normalizer==3.4.9",
+    "contourpy==1.3.3",
+    "cycler==0.12.1",
+    "dgl==1.1.3+cu118",
+    "filelock==3.29.0",
+    "fonttools==4.63.0",
+    "fsspec==2026.4.0",
+    "idna==3.18",
+    "iniconfig==2.3.0",
+    "Jinja2==3.1.6",
+    "kiwisolver==1.5.0",
+    "MarkupSafe==3.0.3",
+    "matplotlib==3.9.2",
+    "mpmath==1.3.0",
+    "networkx==3.6.1",
+    "numpy==1.26.4",
+    "nvidia-cuda-runtime-cu11 @ https://download.pytorch.org/whl/cu118/nvidia_cuda_runtime_cu11-11.8.89-py3-none-manylinux1_x86_64.whl#sha256=f587bd726eb2f7612cf77ce38a2c1e65cf23251ff49437f6161ce0d647f64f7c",
+    "nvidia-cusparse-cu11 @ https://download.pytorch.org/whl/cu118/nvidia_cusparse_cu11-11.7.5.86-py3-none-manylinux1_x86_64.whl#sha256=4ae709fe78d3f23f60acaba8c54b8ad556cf16ca486e0cc1aa92dca7555d2d2b",
+    "packaging==26.2",
+    "pandas==2.2.3",
+    "pillow==12.3.0",
+    "pluggy==1.6.0",
+    "psutil==7.2.2",
+    "pyparsing==3.3.2",
+    "pytest==8.3.5",
+    "python-dateutil==2.9.0.post0",
+    "pytz==2026.2",
+    "PyYAML==6.0.2",
+    "requests==2.34.2",
+    "scipy==1.11.4",
+    "six==1.17.0",
+    "sympy==1.12",
+    "torch==2.1.0+cu118",
+    "tqdm==4.67.1",
+    "triton==2.1.0",
+    "typing_extensions==4.15.0",
+    "tzdata==2026.3",
+    "urllib3==2.7.0"
+  ],
+  "cuda_library_dirs": [
+    "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/torch/lib",
+    "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cuda_runtime/lib",
+    "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/nvidia/cusparse/lib"
+  ],
+  "dgl_native_library": "/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/dgl/libdgl.so",
+  "gpus": [
+    {
+      "index": 0,
+      "name": "Tesla T4",
+      "memory_mib": 15360,
+      "driver": "580.159.04"
+    },
+    {
+      "index": 1,
+      "name": "Tesla T4",
+      "memory_mib": 15360,
+      "driver": "580.159.04"
+    }
+  ],
+  "ram_gib": 31.34774398803711,
+  "disk_free_gib_at_start": 19.50244140625,
+  "disk_total_gib": 19.518142700195312,
+  "disk_free_gib_after_setup": 14.156623840332031,
+  "expected_counts": {
+    "ledger_rows": 186,
+    "evaluated_states": 126,
+    "rows_per_model_protocol": 630,
+    "rows_per_protocol": 2520,
+    "total_result_rows": 5040,
+    "shift_artifact_trainings": 120
+  },
+  "cli_training_overrides": null,
+  "run_key": [
+    "dataset_id",
+    "split_id",
+    "scenario_id",
+    "severity",
+    "graph_seed",
+    "training_seed",
+    "model_id",
+    "protocol"
+  ],
+  "lane_history": [
+    {
+      "task": "r40_s0_variant_secgfd",
+      "protocol": "train_on_variant",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 488.49290013313293,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s0_variant_baselines",
+      "protocol": "train_on_variant",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 483.1701591014862,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s0_variant_pmp",
+      "protocol": "train_on_variant",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 4165.912447214127,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s0_shift_secgfd",
+      "protocol": "train_clean_eval_all",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 75.41964888572693,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s0_shift_baselines",
+      "protocol": "train_clean_eval_all",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 112.91838264465332,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s0_shift_pmp",
+      "protocol": "train_clean_eval_all",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 305.66810035705566,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s1_variant_secgfd",
+      "protocol": "train_on_variant",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 486.7967722415924,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s1_variant_baselines",
+      "protocol": "train_on_variant",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 497.9138722419739,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s1_variant_pmp",
+      "protocol": "train_on_variant",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 4021.809958457947,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s1_shift_secgfd",
+      "protocol": "train_clean_eval_all",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 71.51038694381714,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s1_shift_baselines",
+      "protocol": "train_clean_eval_all",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 106.76566100120544,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s1_shift_pmp",
+      "protocol": "train_clean_eval_all",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 322.0088951587677,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s2_variant_secgfd",
+      "protocol": "train_on_variant",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 484.44189167022705,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s2_variant_baselines",
+      "protocol": "train_on_variant",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 497.8290157318115,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s2_variant_pmp",
+      "protocol": "train_on_variant",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 4274.476888895035,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s2_shift_secgfd",
+      "protocol": "train_clean_eval_all",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 75.69529294967651,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s2_shift_baselines",
+      "protocol": "train_clean_eval_all",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 108.84047651290894,
+      "status": "ok"
+    },
+    {
+      "task": "r40_s2_shift_pmp",
+      "protocol": "train_clean_eval_all",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 324.1576952934265,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s0_variant_secgfd",
+      "protocol": "train_on_variant",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 482.4871587753296,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s0_variant_baselines",
+      "protocol": "train_on_variant",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 487.18854665756226,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s0_variant_pmp",
+      "protocol": "train_on_variant",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 5095.608824968338,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s0_shift_secgfd",
+      "protocol": "train_clean_eval_all",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 65.48805475234985,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s0_shift_baselines",
+      "protocol": "train_clean_eval_all",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 92.47737836837769,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s0_shift_pmp",
+      "protocol": "train_clean_eval_all",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 358.3440375328064,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s1_variant_secgfd",
+      "protocol": "train_on_variant",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 480.612375497818,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s1_variant_baselines",
+      "protocol": "train_on_variant",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 474.8835906982422,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s1_variant_pmp",
+      "protocol": "train_on_variant",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 4693.934043169022,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s1_shift_secgfd",
+      "protocol": "train_clean_eval_all",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 65.53897953033447,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s1_shift_baselines",
+      "protocol": "train_clean_eval_all",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 92.6076591014862,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s1_shift_pmp",
+      "protocol": "train_clean_eval_all",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 332.162385225296,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s2_variant_secgfd",
+      "protocol": "train_on_variant",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 484.652649641037,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s2_variant_baselines",
+      "protocol": "train_on_variant",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 507.8633077144623,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s2_variant_pmp",
+      "protocol": "train_on_variant",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 5014.4405245780945,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s2_shift_secgfd",
+      "protocol": "train_clean_eval_all",
+      "models": "secgfd",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 65.38702249526978,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s2_shift_baselines",
+      "protocol": "train_clean_eval_all",
+      "models": "mlp,sage",
+      "physical_gpu": 0,
+      "attempts": 1,
+      "duration_sec": 90.52795147895813,
+      "status": "ok"
+    },
+    {
+      "task": "r60_s2_shift_pmp",
+      "protocol": "train_clean_eval_all",
+      "models": "pmp",
+      "physical_gpu": 1,
+      "attempts": 1,
+      "duration_sec": 313.82051515579224,
+      "status": "ok"
+    }
+  ],
+  "stage_receipts": {
+    "summaries_validated": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:18:19.643798+00:00",
+      "evidence": {
+        "results_sha256": "0ac4bb7ee4e68ecaf69a082527a63ef999b27919b6d3a8ac2147579788a7139e",
+        "files": {
+          "results_summary_baselines.csv": "97ab9ea246b05cc16c48b203c1d691a49efeb452636546116999df7f8b6ef2cf",
+          "results_summary_pmp.csv": "1510e9cb31f7f5ea9a99979647f9df29a439cf18cb54baf265eeba096ff5160f",
+          "results_summary_secgfd.csv": "18e09ce7297ad452cb7aa57e4e2d8b338300968bb6e386b8b35bf210421ab4cd",
+          "results_summary_shift.csv": "8a3fbc3f1c73e5a9b3d0ea7364e9ab8bd32e0bc2c06f8c50dd3da948a03c4359"
+        }
+      }
+    },
+    "plots_validated": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:34.496732+00:00",
+      "evidence": {
+        "results_sha256": "0ac4bb7ee4e68ecaf69a082527a63ef999b27919b6d3a8ac2147579788a7139e",
+        "files": {
+          "plots/summary_curves.csv": "c11daaa21efb24f24ac3219a5e2248011565291c207edafafd4a25f60d527cdb",
+          "plots/performance_drop_max_stress.csv": "8a2093b5d9b3d75cc4cbfb42578fc32b227cdf9715c3a443f1a5b31976b3fd60",
+          "plots/robustness_scores.csv": "e847422e324609db7764234adf577c1648182da73402ae3720803aaa186cb445",
+          "plots/protocol_contrasts.csv": "59086c2590c9d88cfc83c85a6d7411ebc4f858140ffc14533e4ffe4c71935c79",
+          "plots/worst_case_performance.csv": "446a7e8b0e7448e0d096e925d37c5c2ab5ca17da55454003715c516522a7bd9b",
+          "plots/summary_curves_cross_split.csv": "ea5ddd706521047167b0893add0be2f0c57037f4bd53ffe1fbfbc62a0aee9a2d",
+          "plots/performance_drop_max_stress_cross_split.csv": "13a2931e01c0c210f9bff12fbd7834589bd262f524b5c2bd9845c8dd4f2bcf55",
+          "plots/robustness_scores_cross_split.csv": "7a116d802d8048682b5067010082d6ccea22d3b40cc00288c0d1d00761c0b9be",
+          "plots/protocol_contrasts_cross_split.csv": "a50e2a3dd1416e667f6574fcee59d48d42a70efdf88f9c10fa574a204d2b9607",
+          "plots/worst_case_performance_cross_split.csv": "a33b6c6db96e0521dd8cd681ecf1b67526795fed003c272ab58c22036d6fefa8",
+          "plots/audit_curves_cross_split.csv": "afc9b809f2878abad5d814db9adce945812b9df90cc76acb007a96f5c92fd5a3",
+          "plots/audit_curves.csv": "2e84f84519a9a09c0377fba824312e4ea2d2783048e836e9a899849da7a28d06",
+          "plots/performance_audit_join.csv": "911fb241eb13c5712ec012737f91b24a6bafe3d4d9e350e3cbde0f760dc0df65",
+          "plots/missing_or_error_runs.csv": "83181f9422e3bbefa9712e903c4250e90be7931d9d83b0a210f282da6ef6047e"
+        }
+      }
+    },
+    "report_artifacts_validated": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:34.595876+00:00",
+      "evidence": {
+        "files": {
+          "config.json": "77d2215791b18233b2ba3b079431ac09941e0e7528c934649e9793b64245b909",
+          "graph_variants.csv": "8f51ce56d3d3b3a6e6a4896e34a82165c0aad24381a332b1b10797206e041e06",
+          "variant_audit.csv": "3cd0b7d971ca3f47baef424e693ed328fd1d072fbd1343ac24a8266382af176c",
+          "results.csv": "0ac4bb7ee4e68ecaf69a082527a63ef999b27919b6d3a8ac2147579788a7139e",
+          "results_summary_baselines.csv": "97ab9ea246b05cc16c48b203c1d691a49efeb452636546116999df7f8b6ef2cf",
+          "results_summary_pmp.csv": "1510e9cb31f7f5ea9a99979647f9df29a439cf18cb54baf265eeba096ff5160f",
+          "results_summary_secgfd.csv": "18e09ce7297ad452cb7aa57e4e2d8b338300968bb6e386b8b35bf210421ab4cd",
+          "results_summary_shift.csv": "8a3fbc3f1c73e5a9b3d0ea7364e9ab8bd32e0bc2c06f8c50dd3da948a03c4359",
+          "plots/summary_curves.csv": "c11daaa21efb24f24ac3219a5e2248011565291c207edafafd4a25f60d527cdb",
+          "plots/performance_drop_max_stress.csv": "8a2093b5d9b3d75cc4cbfb42578fc32b227cdf9715c3a443f1a5b31976b3fd60",
+          "plots/robustness_scores.csv": "e847422e324609db7764234adf577c1648182da73402ae3720803aaa186cb445",
+          "plots/protocol_contrasts.csv": "59086c2590c9d88cfc83c85a6d7411ebc4f858140ffc14533e4ffe4c71935c79",
+          "plots/worst_case_performance.csv": "446a7e8b0e7448e0d096e925d37c5c2ab5ca17da55454003715c516522a7bd9b",
+          "plots/audit_curves.csv": "2e84f84519a9a09c0377fba824312e4ea2d2783048e836e9a899849da7a28d06",
+          "plots/performance_audit_join.csv": "911fb241eb13c5712ec012737f91b24a6bafe3d4d9e350e3cbde0f760dc0df65",
+          "plots/missing_or_error_runs.csv": "83181f9422e3bbefa9712e903c4250e90be7931d9d83b0a210f282da6ef6047e",
+          "plots/summary_curves_cross_split.csv": "ea5ddd706521047167b0893add0be2f0c57037f4bd53ffe1fbfbc62a0aee9a2d",
+          "plots/performance_drop_max_stress_cross_split.csv": "13a2931e01c0c210f9bff12fbd7834589bd262f524b5c2bd9845c8dd4f2bcf55",
+          "plots/robustness_scores_cross_split.csv": "7a116d802d8048682b5067010082d6ccea22d3b40cc00288c0d1d00761c0b9be",
+          "plots/audit_curves_cross_split.csv": "afc9b809f2878abad5d814db9adce945812b9df90cc76acb007a96f5c92fd5a3",
+          "plots/protocol_contrasts_cross_split.csv": "a50e2a3dd1416e667f6574fcee59d48d42a70efdf88f9c10fa574a204d2b9607",
+          "plots/worst_case_performance_cross_split.csv": "a33b6c6db96e0521dd8cd681ecf1b67526795fed003c272ab58c22036d6fefa8"
+        },
+        "png_count": 784
+      }
+    },
+    "report_tables_loaded": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:34.776101+00:00",
+      "evidence": {
+        "clean_rows": 240,
+        "cross_split_summary_rows": 720,
+        "cross_split_protocol_contrast_rows": 360,
+        "cross_split_worst_case_rows": 48
+      }
+    },
+    "audit_table_validated": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:34.811613+00:00",
+      "evidence": {
+        "rows": 10
+      }
+    },
+    "ap_tables_validated": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:34.914227+00:00",
+      "evidence": {
+        "drop_rows": 80,
+        "robustness_rows": 80,
+        "protocol_contrast_rows": 360,
+        "worst_case_rows": 16
+      }
+    },
+    "figure_1": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:37.046790+00:00",
+      "evidence": {
+        "path": "presentation/figure_1_ap_curves.png",
+        "sha256": "a2cc8ed8c2fe40a46ec7d541bfc20b761acbd0badac4777d42e5c427c7d2dd15"
+      }
+    },
+    "figure_2": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:38.653873+00:00",
+      "evidence": {
+        "path": "presentation/figure_2_ap_drop_heatmap.png",
+        "sha256": "12755597361770e1983b75b13e2617205904a920584689770513f7c4b30c10de"
+      }
+    },
+    "figure_3": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:40.246437+00:00",
+      "evidence": {
+        "path": "presentation/figure_3_realized_audit.png",
+        "sha256": "af981bf24e4e13cc9be63e69f622df166ede947dd7a4104d693dfc9d5f472184"
+      }
+    },
+    "mlp_invariant": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:40.281341+00:00",
+      "evidence": {
+        "max_graph_only_ap_difference": 0.0,
+        "max_feature_camouflage_ap_change": -0.08632335646416857
+      }
+    },
+    "findings": {
+      "attempt_id": "2026-07-13T09:34:22.166281+00:00",
+      "recorded_utc": "2026-07-13T18:26:40.323964+00:00",
+      "evidence": {
+        "rows": 20,
+        "sha256": "215dfdb9a261322ae06f07d82b07d5725b7f4a39d24ec5d9619cfba1645eb496"
+      }
+    }
+  },
+  "updated_utc": "2026-07-13T18:26:40.450036+00:00",
+  "dataset_files": {
+    "data/dgl/yelp.zip": {
+      "bytes": 17980652,
+      "sha256": "3a31296b951e6c8158dddb783ff2c62709fa987d106bbe21e59f8e119053cec3"
+    },
+    "data/dgl/yelp_a7a80596/YelpChi.mat": {
+      "bytes": 207676376,
+      "sha256": "fedb35a8fa539b27866244d3515a47a76b20080cdacb33112da3458fd2487b42"
+    },
+    "data/dgl/yelp_a7a80596/yelp_dgl_graph_8a7f40d6.bin": {
+      "bytes": 135215250,
+      "sha256": "19922b0c7a2710bab6692dde065013c6d4ee2b6b8e584f00dc297cde3a89c564"
+    }
+  },
+  "dataset_profiles": {
+    "r40_s0": {
+      "nodes": 45954,
+      "edges": 8051348,
+      "feature_rows": 45954,
+      "feature_columns": 32,
+      "normal_nodes": 39277,
+      "fraud_nodes": 6677,
+      "fraud_rate": 0.14529746770858765,
+      "train_nodes": 18380,
+      "validation_nodes": 9190,
+      "test_nodes": 18384
+    },
+    "r40_s1": {
+      "nodes": 45954,
+      "edges": 8051348,
+      "feature_rows": 45954,
+      "feature_columns": 32,
+      "normal_nodes": 39277,
+      "fraud_nodes": 6677,
+      "fraud_rate": 0.14529746770858765,
+      "train_nodes": 18380,
+      "validation_nodes": 9190,
+      "test_nodes": 18384
+    },
+    "r40_s2": {
+      "nodes": 45954,
+      "edges": 8051348,
+      "feature_rows": 45954,
+      "feature_columns": 32,
+      "normal_nodes": 39277,
+      "fraud_nodes": 6677,
+      "fraud_rate": 0.14529746770858765,
+      "train_nodes": 18380,
+      "validation_nodes": 9190,
+      "test_nodes": 18384
+    },
+    "r60_s0": {
+      "nodes": 45954,
+      "edges": 8051348,
+      "feature_rows": 45954,
+      "feature_columns": 32,
+      "normal_nodes": 39277,
+      "fraud_nodes": 6677,
+      "fraud_rate": 0.14529746770858765,
+      "train_nodes": 27572,
+      "validation_nodes": 9190,
+      "test_nodes": 9192
+    },
+    "r60_s1": {
+      "nodes": 45954,
+      "edges": 8051348,
+      "feature_rows": 45954,
+      "feature_columns": 32,
+      "normal_nodes": 39277,
+      "fraud_nodes": 6677,
+      "fraud_rate": 0.14529746770858765,
+      "train_nodes": 27572,
+      "validation_nodes": 9190,
+      "test_nodes": 9192
+    },
+    "r60_s2": {
+      "nodes": 45954,
+      "edges": 8051348,
+      "feature_rows": 45954,
+      "feature_columns": 32,
+      "normal_nodes": 39277,
+      "fraud_nodes": 6677,
+      "fraud_rate": 0.14529746770858765,
+      "train_nodes": 27572,
+      "validation_nodes": 9190,
+      "test_nodes": 9192
+    }
+  },
+  "completed_split_ids": [
+    "r40_s0",
+    "r40_s1",
+    "r40_s2",
+    "r60_s0",
+    "r60_s1",
+    "r60_s2"
+  ],
+  "sequential_graph_eviction": true,
+  "completed_utc": "2026-07-13T18:26:40.446343+00:00",
+  "final_result_rows": 5040,
+  "missing_or_error_rows": 0,
+  "presentation_figures": {
+    "presentation/figure_1_ap_curves.png": "a2cc8ed8c2fe40a46ec7d541bfc20b761acbd0badac4777d42e5c427c7d2dd15",
+    "presentation/figure_2_ap_drop_heatmap.png": "12755597361770e1983b75b13e2617205904a920584689770513f7c4b30c10de",
+    "presentation/figure_3_realized_audit.png": "af981bf24e4e13cc9be63e69f622df166ede947dd7a4104d693dfc9d5f472184"
+  },
+  "bundle_manifest_scope": "Internal completion evidence; ZIP size and SHA-256 are in the external manifest."
+}

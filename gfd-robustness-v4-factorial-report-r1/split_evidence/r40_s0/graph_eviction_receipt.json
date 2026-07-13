@@ -1,0 +1,136 @@
+{
+  "split_id": "r40_s0",
+  "split_regime_id": "train40_val20_test40",
+  "split_seed": 717,
+  "train_size": 0.4,
+  "val_size": 0.2,
+  "test_size": 0.39999999999999997,
+  "full_config_sha256": "77d2215791b18233b2ba3b079431ac09941e0e7528c934649e9793b64245b909",
+  "active_config_sha256": "9d0f85fec256d98f54c17eac859f6d2d7289802acf565e848370d8ab7c3a4275",
+  "run_fingerprint_sha256": "e419afb9dcdffa3c922c355b3964e9d06e54164b7bcef01646262a7c2814dd41",
+  "ledger_sha256": "898cadf98af2a82422d51afa810e75b26792aaa5685ca7a8b7a85b5c9f026e7a",
+  "audit_sha256": "b8bc6494dc522e8db35740b09cf0fffae8298d8d5be2bfd8ec60567b92a33350",
+  "results_sha256": "93413e6c21c2393b199dacfc42140c8dd2dab8a6e0574e4649ea4f7d593cdcc5",
+  "graph_files": [
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/base/yelpchi/r40_s0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "22376d50ddffbcc8ef19aebea884f70135c3556d13b0a546f5eff2c7a2d82a93"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_feature_oracle/0.15/seed_0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "3b8bcf98e7414e77df8721bcd5e02943bd539d52fa46e090b46047d1f0b6d7f8"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_feature_oracle/0.15/seed_1/graph.bin",
+      "bytes": 264771429,
+      "sha256": "c7fb93596a73810e1aed535840ae5639d0051e9b0e824ed4e0ecee42fa692b91"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_feature_oracle/0.30/seed_0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "18b8620c185743768bd16d2aaed9cf9c7dd65bdd8cd542d6a4815dc0fd94dfe4"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_feature_oracle/0.30/seed_1/graph.bin",
+      "bytes": 264771429,
+      "sha256": "13131b5c77120a8974fbb3579232b2f4d481b6714bb0e58f7dd4a114ac6ec96e"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_relation_oracle/0.15/seed_0/graph.bin",
+      "bytes": 265407653,
+      "sha256": "5cae4e78a8f487f447e685da835b43ef2f49bf7911666adf624598747649fc70"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_relation_oracle/0.15/seed_1/graph.bin",
+      "bytes": 265386533,
+      "sha256": "06a3d7c81880e840473afd628fa6d7c652244005a0bdbf708943f0d3055c41aa"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_relation_oracle/0.30/seed_0/graph.bin",
+      "bytes": 266006053,
+      "sha256": "0c4de6f0d8c5da62e856e1871d6cd45f4627fc0727a429fcc18c9ae6644de1da"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/camouflage_relation_oracle/0.30/seed_1/graph.bin",
+      "bytes": 266012069,
+      "sha256": "58da87f79783c503109ebd5da31a030755dcbeaf56789d37d6d678c8e50cc247"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_nonoracle/0.15/seed_0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "a1253ff22c13baaa20da31640658db1d58644867b415e1fb810569039aa65e6b"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_nonoracle/0.15/seed_1/graph.bin",
+      "bytes": 264771429,
+      "sha256": "02e52cba1b5f043bbed5f070cd97618420c86fbec49e81e32c51436f0f7287a1"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_nonoracle/0.30/seed_0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "1a08b7e97cc8d8f1074d52e91f8769862c7809ad0eca42ce0f9af7d7f34bf298"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_nonoracle/0.30/seed_1/graph.bin",
+      "bytes": 264771429,
+      "sha256": "530af3bcc8090c3c446812bd37e7dbe6ba10e5b00f42a88691cdd4bc0a3a0454"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_oracle/0.15/seed_0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "ac3a2c2ee43bc6546fd5a9dd034f92541f5f367161e579fe8ede00a2bc5759e1"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_oracle/0.15/seed_1/graph.bin",
+      "bytes": 264771429,
+      "sha256": "9e26c1efa4b22e57d86f1cbf4443f92d3cc6e7059b2a29695d01b7e2d775307c"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_oracle/0.30/seed_0/graph.bin",
+      "bytes": 264771429,
+      "sha256": "38a04829a08ae5defa70565d719f136a9a752d9d256edefb548e17dd438bbac4"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/heterophily_rewire_oracle/0.30/seed_1/graph.bin",
+      "bytes": 264771429,
+      "sha256": "14e70398bb51d831ea795148d08aa0e5a293a9d5e950c642e9ee2f7fff1b5194"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/noise_edges_uniform/0.10/seed_0/graph.bin",
+      "bytes": 290535717,
+      "sha256": "432ea2b15ebda39e6b600de2cd483f7e9642f495b6cc60c4d10e312e64a0c1b7"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/noise_edges_uniform/0.10/seed_1/graph.bin",
+      "bytes": 290535717,
+      "sha256": "0366b16d1edb2b7f5db2a08284c3ac00be85f9bf26a431d4e5cda49bf60638b2"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/noise_edges_uniform/0.20/seed_0/graph.bin",
+      "bytes": 316300037,
+      "sha256": "57140e5a3573db7131053956b5ce71f6a4fb8437c8e969b08035ead14868a208"
+    },
+    {
+      "path": "/kaggle/working/gfd-robustness-v4-factorial-r1/graphs/variants/yelpchi/r40_s0/noise_edges_uniform/0.20/seed_1/graph.bin",
+      "bytes": 316300037,
+      "sha256": "8545cd1a6ae0c99ad3fb23d8c7fda54ce50ee871b295462ce2d81b983a912c98"
+    }
+  ],
+  "graph_bytes_total": 5718512393,
+  "result_rows": 840,
+  "dataset_profile": {
+    "nodes": 45954,
+    "edges": 8051348,
+    "feature_rows": 45954,
+    "feature_columns": 32,
+    "normal_nodes": 39277,
+    "fraud_nodes": 6677,
+    "fraud_rate": 0.14529746770858765,
+    "train_nodes": 18380,
+    "validation_nodes": 9190,
+    "test_nodes": 18384
+  },
+  "recorded_utc": "2026-07-13T10:57:13.255927+00:00"
+}
