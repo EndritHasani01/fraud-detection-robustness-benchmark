@@ -25,6 +25,7 @@ CI_METHOD_PAIRED_CURVE = "paired_curve_crossed_training_graph_seed_bootstrap"
 CI_METHOD_PAIRED_PROTOCOL = "paired_protocol_crossed_training_graph_seed_bootstrap"
 CI_METHOD_GRAPH_SEED = "graph_seed_bootstrap"
 CI_METHOD_SPLIT = "split_bootstrap_over_split_means"
+UNSPECIFIED_SPLIT_REGIME_ID = "allocation_unspecified"
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,14 @@ class CompletenessReport:
     error_keys: list[tuple[str, str, str, float, int, int, str, str]]
 
 
+@dataclass(frozen=True)
+class SplitAllocation:
+    split_regime_id: str
+    train_size: float | None
+    val_size: float | None
+    test_size: float | None
+
+
 def _safe_int(x: Any, default: int = 0) -> int:
     try:
         return int(float(x))
@@ -101,6 +110,71 @@ def _parse_bool(x: Any) -> bool:
     if isinstance(x, bool):
         return bool(x)
     return str(x).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _format_allocation_rate(value: float) -> str:
+    return format(float(value), ".12g").replace("-", "m").replace(".", "p")
+
+
+def _split_allocations_from_config(cfg: Mapping[str, Any]) -> dict[str, SplitAllocation]:
+    """Map split IDs to comparable train/validation/test allocation regimes."""
+
+    out: dict[str, SplitAllocation] = {}
+    data_splits = cfg.get("data_splits", [])
+    if not isinstance(data_splits, list):
+        return out
+
+    for split_cfg in data_splits:
+        if not isinstance(split_cfg, Mapping):
+            continue
+        split_id = str(split_cfg.get("split_id", "")).strip()
+        if not split_id:
+            continue
+        try:
+            train_size = float(split_cfg["train_size"])
+            val_size = float(split_cfg["val_size"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (math.isfinite(train_size) and math.isfinite(val_size)):
+            continue
+        test_size = round(1.0 - train_size - val_size, 12)
+        explicit_regime_id = str(split_cfg.get("split_regime_id", "")).strip()
+        regime_id = explicit_regime_id or (
+            f"train_{_format_allocation_rate(train_size)}_"
+            f"val_{_format_allocation_rate(val_size)}_"
+            f"test_{_format_allocation_rate(test_size)}"
+        )
+        out[split_id] = SplitAllocation(
+            split_regime_id=regime_id,
+            train_size=train_size,
+            val_size=val_size,
+            test_size=test_size,
+        )
+    return out
+
+
+def _allocation_for_split(
+    split_id: Any,
+    split_allocations: Mapping[str, SplitAllocation],
+) -> SplitAllocation:
+    return split_allocations.get(
+        str(split_id),
+        SplitAllocation(
+            split_regime_id=UNSPECIFIED_SPLIT_REGIME_ID,
+            train_size=None,
+            val_size=None,
+            test_size=None,
+        ),
+    )
+
+
+def _allocation_fields(allocation: SplitAllocation) -> dict[str, Any]:
+    return {
+        "split_regime_id": allocation.split_regime_id,
+        "train_size": "" if allocation.train_size is None else allocation.train_size,
+        "val_size": "" if allocation.val_size is None else allocation.val_size,
+        "test_size": "" if allocation.test_size is None else allocation.test_size,
+    }
 
 
 def _read_results_csv(path: Path) -> list[ResultRow]:
@@ -951,10 +1025,17 @@ def _build_audit_summary_rows(
     return out
 
 
-def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, float, str, str, str, str, bool, str, str], list[dict[str, Any]]] = {}
+def _build_cross_split_audit_rows(
+    audit_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, float, str, str, str, str, bool, str, str], list[dict[str, Any]]] = {}
     for row in audit_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             float(row.get("severity", 0.0) or 0.0),
@@ -971,6 +1052,7 @@ def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: b
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
         (
+            split_regime_id,
             dataset_id,
             scenario_id,
             severity,
@@ -982,10 +1064,17 @@ def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: b
             graph_view_mode,
             source,
         ) = key
+        allocation = next(
+            _allocation_for_split(row.get("split_id", ""), split_allocations)
+            for row in groups[key]
+        )
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split audit allocation regime mismatch")
         split_means = [_safe_float(row.get("mean", "")) for row in groups[key]]
         stats = _aggregate_metric_stats(split_means, ci=ci)
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "severity": float(severity),
@@ -1412,10 +1501,17 @@ def _yerr_from_stats(stats_by_point: Sequence[MetricStats], *, use_ci: bool) -> 
     return out
 
 
-def _build_cross_split_summary_rows(summary_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, float, str, str, str, bool, str], list[dict[str, Any]]] = {}
+def _build_cross_split_summary_rows(
+    summary_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, float, str, str, str, bool, str], list[dict[str, Any]]] = {}
     for row in summary_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             float(row.get("severity", 0.0) or 0.0),
@@ -1429,12 +1525,16 @@ def _build_cross_split_summary_rows(summary_rows: Sequence[dict[str, Any]], *, c
 
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
-        dataset_id, scenario_id, severity, model_id, protocol, metric, oracle_labels, source = key
+        split_regime_id, dataset_id, scenario_id, severity, model_id, protocol, metric, oracle_labels, source = key
         rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split summary allocation regime mismatch")
         split_means = [_safe_float(row.get("mean", "")) for row in rows]
         stats = _aggregate_metric_stats(split_means, ci=ci)
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "severity": float(severity),
@@ -1464,10 +1564,17 @@ def _build_cross_split_summary_rows(summary_rows: Sequence[dict[str, Any]], *, c
     return out
 
 
-def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, str, str, str, float, bool], list[dict[str, Any]]] = {}
+def _build_cross_split_drop_rows(
+    drop_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, str, str, str, float, bool], list[dict[str, Any]]] = {}
     for row in drop_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             str(row.get("model_id", "")),
@@ -1480,13 +1587,17 @@ def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: boo
 
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
-        dataset_id, scenario_id, model_id, protocol, metric, max_severity, oracle_labels = key
+        split_regime_id, dataset_id, scenario_id, model_id, protocol, metric, max_severity, oracle_labels = key
         rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split drop allocation regime mismatch")
         clean_stats = _aggregate_metric_stats([_safe_float(row.get("clean_mean", "")) for row in rows], ci=ci)
         stressed_stats = _aggregate_metric_stats([_safe_float(row.get("max_severity_mean", "")) for row in rows], ci=ci)
         drop_stats = _aggregate_metric_stats([_safe_float(row.get("drop_mean", "")) for row in rows], ci=ci)
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "model_id": model_id,
@@ -1523,10 +1634,17 @@ def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: boo
     return out
 
 
-def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, str, str, str, bool], list[dict[str, Any]]] = {}
+def _build_cross_split_robust_rows(
+    robust_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, str, str, str, bool], list[dict[str, Any]]] = {}
     for row in robust_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             str(row.get("model_id", "")),
@@ -1538,8 +1656,11 @@ def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci:
 
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
-        dataset_id, scenario_id, model_id, protocol, metric, oracle_labels = key
+        split_regime_id, dataset_id, scenario_id, model_id, protocol, metric, oracle_labels = key
         rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split robustness allocation regime mismatch")
         auc_stats = _aggregate_metric_stats([_safe_float(row.get("robustness_auc_mean", "")) for row in rows], ci=ci)
         avg_stats = _aggregate_metric_stats(
             [_safe_float(row.get("robustness_avg_metric_mean", "")) for row in rows],
@@ -1547,6 +1668,7 @@ def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci:
         )
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "model_id": model_id,
@@ -1573,6 +1695,254 @@ def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci:
                     default=0,
                 ),
                 "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+            }
+        )
+    return out
+
+
+def _build_cross_split_protocol_contrast_rows(
+    contrast_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in contrast_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        key = (
+            allocation.split_regime_id,
+            str(row.get("dataset_id", "")),
+            str(row.get("scenario_id", "")),
+            float(row.get("severity", 0.0) or 0.0),
+            str(row.get("model_id", "")),
+            str(row.get("metric", "")),
+            bool(row.get("oracle_labels", False)),
+            str(row.get("claim_scope", "")),
+            str(row.get("left_claim_scope", "")),
+            str(row.get("right_claim_scope", "")),
+            bool(row.get("operational_ranking_eligible", False)),
+            str(row.get("left_protocol", "")),
+            str(row.get("right_protocol", "")),
+            str(row.get("contrast_definition", "")),
+            str(row.get("source", "")),
+        )
+        groups.setdefault(key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        (
+            split_regime_id,
+            dataset_id,
+            scenario_id,
+            severity,
+            model_id,
+            metric,
+            oracle_labels,
+            claim_scope,
+            left_claim_scope,
+            right_claim_scope,
+            operational_ranking_eligible,
+            left_protocol,
+            right_protocol,
+            contrast_definition,
+            source,
+        ) = key
+        rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split protocol contrast allocation regime mismatch")
+        left_stats = _aggregate_metric_stats(
+            [_safe_float(row.get("left_mean", "")) for row in rows],
+            ci=ci,
+        )
+        right_stats = _aggregate_metric_stats(
+            [_safe_float(row.get("right_mean", "")) for row in rows],
+            ci=ci,
+        )
+        contrast_stats = _aggregate_metric_stats(
+            [_safe_float(row.get("contrast_mean", "")) for row in rows],
+            ci=ci,
+        )
+        out.append(
+            {
+                **_allocation_fields(allocation),
+                "dataset_id": dataset_id,
+                "scenario_id": scenario_id,
+                "severity": float(severity),
+                "model_id": model_id,
+                "metric": metric,
+                "oracle_labels": bool(oracle_labels),
+                "claim_scope": claim_scope,
+                "left_claim_scope": left_claim_scope,
+                "right_claim_scope": right_claim_scope,
+                "operational_ranking_eligible": bool(operational_ranking_eligible),
+                "left_protocol": left_protocol,
+                "right_protocol": right_protocol,
+                "contrast_definition": contrast_definition,
+                "left_mean": left_stats.mean,
+                "right_mean": right_stats.mean,
+                "contrast_mean": contrast_stats.mean,
+                "contrast_std": contrast_stats.std,
+                "contrast_ci_lower": contrast_stats.ci_lower,
+                "contrast_ci_upper": contrast_stats.ci_upper,
+                "n_splits": contrast_stats.n,
+                "min_pairs_per_split": min(
+                    (_safe_int(row.get("n_pairs", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_training_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "source": source,
+            }
+        )
+    return out
+
+
+def _build_cross_split_worst_case_rows(
+    summary_rows: Sequence[dict[str, Any]],
+    result_rows: Sequence[ResultRow],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    """Select the lowest regime-level point, then aggregate paired split means."""
+
+    candidates: dict[tuple[str, str, str, str, str], dict[tuple[str, float, bool], list[dict[str, Any]]]] = {}
+    for row in summary_rows:
+        mean_value = _safe_float(row.get("mean", ""))
+        if str(row.get("source", "")) != "scenario" or not math.isfinite(mean_value):
+            continue
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        group_key = (
+            allocation.split_regime_id,
+            str(row.get("dataset_id", "")),
+            str(row.get("model_id", "")),
+            str(row.get("protocol", "")),
+            str(row.get("metric", "")),
+        )
+        point_key = (
+            str(row.get("scenario_id", "")),
+            float(row.get("severity", 0.0) or 0.0),
+            bool(row.get("oracle_labels", False)),
+        )
+        candidates.setdefault(group_key, {}).setdefault(point_key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for group_key in sorted(candidates):
+        split_regime_id, dataset_id, model_id, protocol, metric_key = group_key
+        point_groups = candidates[group_key]
+        selected_key, selected_rows = min(
+            point_groups.items(),
+            key=lambda item: (
+                _aggregate_metric_stats(
+                    [_safe_float(row.get("mean", "")) for row in item[1]],
+                    ci=False,
+                ).mean,
+                item[0][0],
+                item[0][1],
+            ),
+        )
+        scenario_id, severity, oracle_labels = selected_key
+        allocation = _allocation_for_split(
+            selected_rows[0].get("split_id", ""),
+            split_allocations,
+        )
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split worst-case allocation regime mismatch")
+
+        worst_split_means: list[float] = []
+        clean_split_means: list[float] = []
+        drop_split_means: list[float] = []
+        retention_split_means: list[float] = []
+        for summary_row in selected_rows:
+            split_id = str(summary_row.get("split_id", ""))
+            split_results = [
+                row
+                for row in result_rows
+                if row.dataset_id == dataset_id
+                and row.split_id == split_id
+                and row.model_id == model_id
+                and row.protocol == protocol
+            ]
+            clean_rows = _result_rows_for_point(
+                split_results,
+                model_id=model_id,
+                protocol=protocol,
+                scenario_id="clean",
+                severity=0.0,
+            )
+            stressed_rows = _result_rows_for_point(
+                split_results,
+                model_id=model_id,
+                protocol=protocol,
+                scenario_id=scenario_id,
+                severity=severity,
+            )
+            clean_stats = _aggregate_seeded_metric_stats(clean_rows, metric_key, ci=False)
+            drop_stats = _paired_clean_stress_stats(clean_rows, stressed_rows, metric_key, ci=False)
+            retention_stats = _paired_retention_stats(clean_rows, stressed_rows, metric_key, ci=False)
+            worst_split_means.append(_safe_float(summary_row.get("mean", "")))
+            clean_split_means.append(clean_stats.stats.mean)
+            drop_split_means.append(drop_stats.stats.mean)
+            retention_split_means.append(retention_stats.stats.mean)
+
+        worst_stats = _aggregate_metric_stats(worst_split_means, ci=ci)
+        clean_stats = _aggregate_metric_stats(clean_split_means, ci=ci)
+        drop_stats = _aggregate_metric_stats(drop_split_means, ci=ci)
+        retention_stats = _aggregate_metric_stats(retention_split_means, ci=ci)
+        claim_scope = _claim_scope(oracle_labels=oracle_labels, protocol=protocol)
+        out.append(
+            {
+                **_allocation_fields(allocation),
+                "dataset_id": dataset_id,
+                "model_id": model_id,
+                "protocol": protocol,
+                "metric": metric_key,
+                "worst_scenario_id": scenario_id,
+                "worst_severity": float(severity),
+                "oracle_labels": bool(oracle_labels),
+                "claim_scope": claim_scope,
+                "operational_ranking_eligible": not bool(oracle_labels),
+                "worst_mean": worst_stats.mean,
+                "worst_std": worst_stats.std,
+                "worst_ci_lower": worst_stats.ci_lower,
+                "worst_ci_upper": worst_stats.ci_upper,
+                "clean_mean": clean_stats.mean,
+                "clean_std": clean_stats.std,
+                "clean_ci_lower": clean_stats.ci_lower,
+                "clean_ci_upper": clean_stats.ci_upper,
+                "drop_from_clean_mean": drop_stats.mean,
+                "drop_from_clean_std": drop_stats.std,
+                "drop_from_clean_ci_lower": drop_stats.ci_lower,
+                "drop_from_clean_ci_upper": drop_stats.ci_upper,
+                "retention_fraction_mean": retention_stats.mean,
+                "retention_fraction_std": retention_stats.std,
+                "retention_fraction_ci_lower": retention_stats.ci_lower,
+                "retention_fraction_ci_upper": retention_stats.ci_upper,
+                "n_splits": worst_stats.n,
+                "min_runs_per_split": min(
+                    (_safe_int(row.get("n_runs", 0)) for row in selected_rows),
+                    default=0,
+                ),
+                "min_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_training_seeds", 0)) for row in selected_rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in selected_rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "drop_ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "retention_ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "selection_method": "minimum_configured_nonzero_point_cross_split_mean",
             }
         )
     return out
@@ -2271,14 +2641,46 @@ def run_plots_stage(
         audit_summary_rows,
     )
 
-    cross_split_summary_rows = _build_cross_split_summary_rows(summary_rows, ci=ci)
-    cross_split_drop_rows = _build_cross_split_drop_rows(drop_rows, ci=ci)
-    cross_split_robust_rows = _build_cross_split_robust_rows(robust_rows, ci=ci)
-    cross_split_audit_rows = _build_cross_split_audit_rows(audit_summary_rows, ci=ci)
+    split_allocations = _split_allocations_from_config(cfg)
+    cross_split_summary_rows = _build_cross_split_summary_rows(
+        summary_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_drop_rows = _build_cross_split_drop_rows(
+        drop_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_robust_rows = _build_cross_split_robust_rows(
+        robust_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_audit_rows = _build_cross_split_audit_rows(
+        audit_summary_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_protocol_contrast_rows = _build_cross_split_protocol_contrast_rows(
+        protocol_contrast_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_worst_case_rows = _build_cross_split_worst_case_rows(
+        summary_rows,
+        ok,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
 
     _write_csv(
         plots_dir / "summary_curves_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "severity",
@@ -2303,6 +2705,10 @@ def run_plots_stage(
     _write_csv(
         plots_dir / "performance_drop_max_stress_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "model_id",
@@ -2334,6 +2740,10 @@ def run_plots_stage(
     _write_csv(
         plots_dir / "robustness_scores_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "model_id",
@@ -2360,6 +2770,10 @@ def run_plots_stage(
     _write_csv(
         plots_dir / "audit_curves_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "severity",
@@ -2382,21 +2796,117 @@ def run_plots_stage(
         ],
         cross_split_audit_rows,
     )
+    _write_csv(
+        plots_dir / "protocol_contrasts_cross_split.csv",
+        [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
+            "dataset_id",
+            "scenario_id",
+            "severity",
+            "model_id",
+            "metric",
+            "oracle_labels",
+            "claim_scope",
+            "left_claim_scope",
+            "right_claim_scope",
+            "operational_ranking_eligible",
+            "left_protocol",
+            "right_protocol",
+            "contrast_definition",
+            "left_mean",
+            "right_mean",
+            "contrast_mean",
+            "contrast_std",
+            "contrast_ci_lower",
+            "contrast_ci_upper",
+            "n_splits",
+            "min_pairs_per_split",
+            "min_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
+            "source",
+        ],
+        cross_split_protocol_contrast_rows,
+    )
+    _write_csv(
+        plots_dir / "worst_case_performance_cross_split.csv",
+        [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
+            "dataset_id",
+            "model_id",
+            "protocol",
+            "metric",
+            "worst_scenario_id",
+            "worst_severity",
+            "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
+            "worst_mean",
+            "worst_std",
+            "worst_ci_lower",
+            "worst_ci_upper",
+            "clean_mean",
+            "clean_std",
+            "clean_ci_lower",
+            "clean_ci_upper",
+            "drop_from_clean_mean",
+            "drop_from_clean_std",
+            "drop_from_clean_ci_lower",
+            "drop_from_clean_ci_upper",
+            "retention_fraction_mean",
+            "retention_fraction_std",
+            "retention_fraction_ci_lower",
+            "retention_fraction_ci_upper",
+            "n_splits",
+            "min_runs_per_split",
+            "min_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
+            "drop_ci_method",
+            "retention_ci_method",
+            "selection_method",
+        ],
+        cross_split_worst_case_rows,
+    )
 
-    split_counts_by_dataset_protocol: dict[tuple[str, str], set[str]] = {}
+    split_counts_by_dataset_protocol: dict[tuple[str, str, str], set[str]] = {}
     for row in summary_rows:
-        key = (str(row.get("dataset_id", "")), str(row.get("protocol", "")))
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        key = (
+            str(row.get("dataset_id", "")),
+            str(row.get("protocol", "")),
+            allocation.split_regime_id,
+        )
         split_counts_by_dataset_protocol.setdefault(key, set()).add(str(row.get("split_id", "")))
 
-    for dataset_id, protocol in sorted(split_counts_by_dataset_protocol):
-        if len(split_counts_by_dataset_protocol[(dataset_id, protocol)]) <= 1:
+    regimes_by_dataset_protocol: dict[tuple[str, str], set[str]] = {}
+    for dataset_id, protocol, split_regime_id in split_counts_by_dataset_protocol:
+        regimes_by_dataset_protocol.setdefault((dataset_id, protocol), set()).add(split_regime_id)
+
+    for dataset_id, protocol, split_regime_id in sorted(split_counts_by_dataset_protocol):
+        if len(split_counts_by_dataset_protocol[(dataset_id, protocol, split_regime_id)]) <= 1:
             continue
         dataset_rows = [
             row
             for row in cross_split_summary_rows
-            if str(row.get("dataset_id", "")) == dataset_id and str(row.get("protocol", "")) == protocol
+            if str(row.get("dataset_id", "")) == dataset_id
+            and str(row.get("protocol", "")) == protocol
+            and str(row.get("split_regime_id", "")) == split_regime_id
         ]
         out_group_dir = plots_dir / protocol / dataset_id / "across_splits"
+        if len(regimes_by_dataset_protocol[(dataset_id, protocol)]) > 1:
+            out_group_dir = out_group_dir / split_regime_id
+        split_label = (
+            "across_splits"
+            if split_regime_id == UNSPECIFIED_SPLIT_REGIME_ID
+            else f"across_splits [{split_regime_id}]"
+        )
         for scenario_cfg in cfg.get("scenarios", []):
             scenario_id = str(scenario_cfg.get("scenario_id", ""))
             oracle_labels = _scenario_oracle_labels(scenario_meta, scenario_id)
@@ -2415,7 +2925,7 @@ def run_plots_stage(
                     metric_rows,
                     out_group_dir=out_group_dir,
                     dataset_id=dataset_id,
-                    split_label="across_splits",
+                    split_label=split_label,
                     protocol=protocol,
                     scenario_id=scenario_id,
                     scenario_display_name=scenario_display_name,
@@ -2468,20 +2978,38 @@ def run_plots_stage(
                         plt=plt,
                     )
 
-    split_counts_by_dataset_protocol_audit: dict[tuple[str, str], set[str]] = {}
+    split_counts_by_dataset_protocol_audit: dict[tuple[str, str, str], set[str]] = {}
     for row in audit_summary_rows:
-        key = (str(row.get("dataset_id", "")), str(row.get("protocol", "")))
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        key = (
+            str(row.get("dataset_id", "")),
+            str(row.get("protocol", "")),
+            allocation.split_regime_id,
+        )
         split_counts_by_dataset_protocol_audit.setdefault(key, set()).add(str(row.get("split_id", "")))
 
-    for dataset_id, protocol in sorted(split_counts_by_dataset_protocol_audit):
-        if len(split_counts_by_dataset_protocol_audit[(dataset_id, protocol)]) <= 1:
+    regimes_by_dataset_protocol_audit: dict[tuple[str, str], set[str]] = {}
+    for dataset_id, protocol, split_regime_id in split_counts_by_dataset_protocol_audit:
+        regimes_by_dataset_protocol_audit.setdefault((dataset_id, protocol), set()).add(split_regime_id)
+
+    for dataset_id, protocol, split_regime_id in sorted(split_counts_by_dataset_protocol_audit):
+        if len(split_counts_by_dataset_protocol_audit[(dataset_id, protocol, split_regime_id)]) <= 1:
             continue
         dataset_rows = [
             row
             for row in cross_split_audit_rows
-            if str(row.get("dataset_id", "")) == dataset_id and str(row.get("protocol", "")) == protocol
+            if str(row.get("dataset_id", "")) == dataset_id
+            and str(row.get("protocol", "")) == protocol
+            and str(row.get("split_regime_id", "")) == split_regime_id
         ]
         out_group_dir = plots_dir / protocol / dataset_id / "across_splits"
+        if len(regimes_by_dataset_protocol_audit[(dataset_id, protocol)]) > 1:
+            out_group_dir = out_group_dir / split_regime_id
+        split_label = (
+            "across_splits"
+            if split_regime_id == UNSPECIFIED_SPLIT_REGIME_ID
+            else f"across_splits [{split_regime_id}]"
+        )
         for scenario_cfg in cfg.get("scenarios", []):
             scenario_id = str(scenario_cfg.get("scenario_id", ""))
             oracle_labels = _scenario_oracle_labels(scenario_meta, scenario_id)
@@ -2498,7 +3026,7 @@ def run_plots_stage(
                     metric_rows,
                     out_group_dir=out_group_dir,
                     dataset_id=dataset_id,
-                    split_label="across_splits",
+                    split_label=split_label,
                     protocol=protocol,
                     scenario_id=scenario_id,
                     scenario_display_name=scenario_display_name,

@@ -320,7 +320,7 @@ def _validate_datasets(datasets: list[Any]) -> None:
 
 def _validate_data_splits(data_splits: list[Any]) -> None:
     split_ids: list[str] = []
-    split_seeds: list[int] = []
+    split_definitions: list[tuple[int, float, float]] = []
     for idx, split_cfg in enumerate(data_splits):
         prefix = f"cfg['data_splits'][{idx}]"
         if not isinstance(split_cfg, dict):
@@ -330,19 +330,20 @@ def _validate_data_splits(data_splits: list[Any]) -> None:
         split_seed = split_cfg.get("split_seed")
         if isinstance(split_seed, bool) or not isinstance(split_seed, int):
             raise ConfigError(f"{prefix}.split_seed must be an integer")
-        split_seeds.append(int(split_seed))
-
         train_size = _require_non_negative_number(split_cfg.get("train_size"), path=f"{prefix}.train_size")
         val_size = _require_non_negative_number(split_cfg.get("val_size"), path=f"{prefix}.val_size")
         if train_size <= 0.0 or val_size <= 0.0:
             raise ConfigError(f"{prefix}.train_size and {prefix}.val_size must both be > 0")
         if train_size + val_size >= 1.0:
             raise ConfigError(f"{prefix}.train_size + {prefix}.val_size must be < 1")
+        split_definitions.append((int(split_seed), float(train_size), float(val_size)))
 
     if len(split_ids) != len(set(split_ids)):
         raise ConfigError("cfg['data_splits'] must use unique split_id values")
-    if len(split_seeds) != len(set(split_seeds)):
-        raise ConfigError("cfg['data_splits'] must use unique split_seed values")
+    if len(split_definitions) != len(set(split_definitions)):
+        raise ConfigError(
+            "cfg['data_splits'] must not repeat the same split_seed/train_size/val_size definition"
+        )
 
 
 def validate_config(cfg: dict[str, Any]) -> None:
