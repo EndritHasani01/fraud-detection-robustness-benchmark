@@ -6,13 +6,195 @@ Final project report, 13 July 2026
 
 The values in this report come from the executed notebook [KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb](KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb) and the evidence package [gfd-robustness-v4-factorial-report-r1](gfd-robustness-v4-factorial-report-r1/). I round values in the text and tables for readability. The CSV files in the evidence package keep the full precision.
 
+## Oral presentation script (12–15 minutes)
+
+### Slide 1 — The question behind the project
+
+**Say:**
+
+Good morning. My project asks a simple but important question: *if a fraud detector learns from a network of relationships, what happens when those relationships or the observed information become unreliable?*
+
+Fraud detection is usually introduced as a classification problem. We take an item—for example, a review—and predict one of two classes: suspicious or normal. A conventional model makes that decision from the item’s own attributes. A graph-based model also looks at connections: who wrote the review, what product it concerns, and when it was posted.
+
+That extra context can be valuable, but it creates a dependency. If the neighborhood becomes noisy, misleading, or deliberately benign-looking, a model that uses the graph may be affected. Clean accuracy alone therefore does not tell us whether a model is dependable. This project builds a controlled way to test that question.
+
+**Take-away:** Better clean performance does not automatically mean better performance after the data environment changes.
+
+### Slide 2 — First principle: what is a graph?
+
+**Say:**
+
+Before discussing graph neural networks, I will define the basic objects. A graph is a mathematical representation of relationships. It has **nodes**, which represent entities, and **edges**, which represent connections between entities.
+
+In this project, each node is one Yelp review. An edge says that two reviews share a meaningful context, such as the same user, the same product and rating, or the same product and month. Every review also has 32 numerical **features**—descriptive measurements that a normal machine-learning model can read.
+
+The prediction task is called **node classification**: for every review node, predict whether it belongs to the positive, suspicious class or the negative, normal class. YelpChi contains 45,954 reviews, of which 6,677—about 14.5%—are positive. That imbalance matters: a system can appear accurate by predicting “normal” very often, while still missing the cases we care about.
+
+**Take-away:** A graph adds relational evidence to ordinary row-and-column data.
+
+### Slide 3 — Why can relationships help, and why can they hurt?
+
+**Say:**
+
+A graph neural network, or GNN, learns by **message passing**. In plain language, each node receives information from its neighbors and combines it with its own features. For a review, the model can ask: “What do the connected reviews look like, and does that context help me judge this review?”
+
+This is useful when neighbors carry relevant information. But it can hurt when neighbors are misleading. In fraud data, suspicious and normal reviews can be connected. This is related to **heterophily**, which means connected nodes often have different labels. It is the opposite of homophily, where similar labels tend to connect.
+
+Imagine judging a person partly by their social circle. If the circle is informative, this helps. If the circle is random, manipulated, or full of ordinary-looking accounts, it can lead to a worse decision. My benchmark measures this trade-off instead of assuming that all edges are helpful.
+
+**Take-away:** Message passing is useful only when the neighborhood supplies trustworthy signal.
+
+### Slide 4 — Dataset, models, and fair comparison
+
+**Say:**
+
+I used YelpChi, a standard graph fraud-detection dataset distributed through DGL. To make the comparison fair, every executed model received the same homogeneous graph view, the same fixed train/validation/test masks within a split, the same metrics, and the same stress variants.
+
+I compared four models. The first is an **MLP**, a feature-only neural network. It never reads edges, so it is an essential control: graph-only changes should not affect it. The second is **GraphSAGE**, a standard GNN that averages neighbor information. The third is **PMP**, or Partitioning Message Passing, which separates different kinds of neighbor messages instead of treating every neighbor identically. The fourth is **SEC-GFD**, which uses spectral graph filtering and a local environmental constraint to handle mixed neighborhoods.
+
+The final two are integrated research-code adapters rather than full reproductions of their original papers. This is an important boundary: the experiment compares the implemented adapters under one shared benchmark, not universal versions of the published methods.
+
+| Model | Beginner-friendly description | Why it is included |
+|---|---|---|
+| MLP | Looks only at a review’s own features | Checks whether graph information adds value |
+| GraphSAGE | Averages information from neighbors | Standard message-passing baseline |
+| PMP | Handles different neighbor groups differently | Specialized fraud-focused graph method |
+| SEC-GFD | Filters graph signals at different scales | Specialized heterophily-aware method |
+
+### Slide 5 — What does “robustness” mean here?
+
+**Say:**
+
+In this project, robustness does not mean that a model never changes. It means we measure how its performance responds when specific parts of the input are changed in a known and repeatable way.
+
+I created five stress scenarios. **Feature camouflage** makes selected suspicious reviews look more like normal reviews by replacing their features. **Relation camouflage** changes selected suspicious reviews’ neighborhoods to look more benign. **Uniform edge noise** adds irrelevant random connections. **Non-oracle rewiring** replaces destinations using a partition derived only from features; it is the main non-label-based structural stress. Finally, **oracle rewiring** uses the true labels to force opposite-label connections.
+
+The oracle cases are deliberately separated. They are useful for understanding a mechanism, but because their construction reads labels from all nodes—including test nodes—they are not realistic deployment attacks and cannot be used for an operational ranking.
+
+**Take-away:** A controlled stress test is not a claim that we have perfectly simulated a real attacker; it is a way to isolate a possible failure mechanism.
+
+### Slide 6 — Two different questions require two protocols
+
+**Say:**
+
+The same changed graph can answer two very different questions. In the first protocol, **train on variant**, the model is trained and tested on the changed graph. This asks: “If we know the environment has changed and can retrain, how well can the model adapt?”
+
+In the second protocol, **train clean, evaluate all**, the model is trained once on the clean graph and then faces each changed graph without retraining. This asks: “What happens after an unexpected deployment shift?”
+
+These should never be mixed. A model can adapt well after retraining but still fail when a sudden graph change appears in production. For every run, early stopping and the classification threshold use validation data only, never test outcomes. The only disclosed exception is the construction of oracle diagnostic variants.
+
+| Protocol | Everyday analogy | Question answered |
+|---|---|---|
+| Train on variant | Study after receiving the new syllabus | Can the model adapt? |
+| Train clean, evaluate all | Take the exam after the syllabus changed unexpectedly | Can the deployed model withstand shift? |
+
+### Slide 7 — How I measured performance reliably
+
+**Say:**
+
+The primary metric is **Average Precision**, or AP. It summarizes how well the model ranks suspicious reviews near the top of its list. This is appropriate because fraud is the minority class: we care about retrieving true positives without flooding the reviewer with false alarms. A random ranking would have AP close to the positive rate, about 0.145 here.
+
+I also report **ROC-AUC**, another ranking metric, and **macro-F1**, a threshold-based score that gives equal weight to both classes. AP leads the interpretation because of the imbalance.
+
+One run is not enough for a robustness claim. I used two train/validation/test allocation regimes, three split seeds in each regime, two graph-construction seeds, and five training seeds. In total this produced 5,040 successful evaluation rows. Repeating seeds lets us see whether a result is stable or whether it depends on a lucky split or neural-network initialization.
+
+**Take-away:** The benchmark evaluates both average performance and the reliability of that performance.
+
+### Slide 8 — Clean-data result
+
+**Say:**
+
+On the clean graph, PMP was the strongest integrated detector. In the 40/20/40 allocation, its AP was 0.555, compared with 0.450 for SEC-GFD, 0.406 for MLP, and 0.399 for GraphSAGE. With the 60/20/20 allocation, PMP rose to 0.583 AP and remained first.
+
+This is encouraging for PMP, but it is not the conclusion by itself. The more interesting point is that the MLP—the model that ignores the graph—was competitive with GraphSAGE in the five-seed average. That tells us ordinary mean neighbor aggregation is not automatically beneficial on this shared, heterogeneous graph view.
+
+| Allocation | MLP AP | GraphSAGE AP | PMP AP | SEC-GFD AP |
+|---|---:|---:|---:|---:|
+| 40/20/40 | 0.406 | 0.399 | **0.555** | 0.450 |
+| 60/20/20 | 0.424 | 0.390 | **0.583** | 0.458 |
+
+**Take-away:** On clean YelpChi, the PMP adapter is the best of the four evaluated systems, but graph use is not automatically an improvement.
+
+### Slide 9 — Main operational result: score versus drop
+
+**Say:**
+
+For the deployment-style result, I focus only on the two non-oracle graph stresses: non-oracle rewiring and uniform edge noise. PMP had the highest AP in every maximum-stress comparison and in all three reported metrics.
+
+However, PMP also lost more AP when a clean-trained model met an unexpected changed graph. Under maximum non-oracle rewiring in the 60% allocation, PMP fell from 0.583 to 0.502: a drop of 0.080. The MLP had zero graph-only drop, because it never reads edges, but it ended at 0.424—well below PMP’s stressed score.
+
+This is the central distinction in the project. **Retention** asks, “What fraction of the clean score remains?” **Absolute stressed performance** asks, “How useful is the detector after the shift?” The MLP wins on graph invariance; PMP wins on actual stressed AP. A responsible report must show both instead of selecting whichever definition favors a preferred model.
+
+| Maximum operational stress, 60/20/20 clean-trained shift | Clean AP | Stressed AP | AP loss |
+|---|---:|---:|---:|
+| MLP | 0.424 | 0.424 | 0.000 |
+| GraphSAGE | 0.390 | 0.383 | 0.008 |
+| PMP | **0.583** | **0.516** | 0.067 |
+| SEC-GFD | 0.454 | 0.448 | 0.006 |
+
+**Take-away:** PMP is most robust by absolute stressed usefulness, not by invariance to graph shift.
+
+### Slide 10 — Feature camouflage and the oracle warning
+
+**Say:**
+
+Feature camouflage was the most consistent weakness. When selected suspicious reviews received normal-review features, every model degraded, including the graph-blind MLP. At maximum severity, AP losses ranged from roughly 0.078 to 0.134. This tells us that relational context cannot fully replace lost feature information.
+
+The oracle-rewiring diagnostic showed why protocol and claim scope matter. When SEC-GFD was trained on a topology constructed using true labels, it reached AP near 1.0. But when it was trained on the clean graph and then met that same changed topology, its AP fell near the random-reference level.
+
+That apparent contradiction is not a mistake. It demonstrates that label-constructed structure becomes a privileged signal when it is present during training. It is evidence of a training-distribution interaction—not evidence of perfect real-world robustness.
+
+![Selected AP curves: feature camouflage and oracle rewiring](gfd-robustness-v4-factorial-report-r1/presentation/figure_1_ap_curves.png)
+
+**Take-away:** Oracle diagnostics can reveal sensitivity, but they must not be advertised as deployment performance.
+
+### Slide 11 — Why repeated seeds changed the story
+
+**Say:**
+
+Repeated experiments exposed an important baseline limitation. One GraphSAGE training seed collapsed on five of the six split configurations: its clean AP was approximately 0.19 to 0.20, versus roughly 0.43 to 0.44 for its other seeds. If I had reported only a favorable GraphSAGE seed, I could have claimed a different baseline ranking.
+
+I did not delete this run because instability is itself a reliability result. A model that sometimes finds a poor solution is less dependable, even before the graph is perturbed. PMP remained first and SEC-GFD second across the tested split seeds and allocation regimes; the MLP-versus-GraphSAGE ordering was more sensitive to optimization seed.
+
+This is why reproducibility is not just about setting a random seed once. It means deliberately measuring important sources of variation and making them visible.
+
+**Take-away:** Robustness includes optimization stability, not only resistance to data perturbations.
+
+### Slide 12 — Conclusion, limits, and next step
+
+**Say:**
+
+To conclude, this project created a reproducible robustness benchmark for graph-based fraud detection on YelpChi. Across the tested splits, graph variants, and seeds, the PMP adapter had the highest clean and non-oracle stressed AP, ROC-AUC, and macro-F1. Its stronger use of graph information also made it more sensitive to unexpected graph shift than models that used less graph information.
+
+Feature camouflage was the broadest consistent failure mode. Retraining on a known changed graph recovered part of PMP’s lost performance, but that is not a substitute for a sudden-shift evaluation. Oracle rewiring revealed a large train-versus-deployment interaction and is correctly treated as a privileged diagnostic.
+
+The limitations are equally important: this is one static dataset; the graph was converted to a common homogeneous view; there are only three split seeds per allocation; and PMP and SEC-GFD are feasibility adapters, not full paper reproductions. The next research step is to restore multi-relation structure, calibrate non-oracle perturbations to achieve a measured heterophily target, and test additional datasets and architectures under the same transparent protocol.
+
+My final answer is therefore nuanced: **PMP was the most useful detector after the operational stresses tested here, but no model should be called universally robust from one clean score or one benchmark alone.**
+
+### Questions I expect and concise answers
+
+**Why not use accuracy?** Because only about 14.5% of nodes are positive. A model could achieve high accuracy by predicting normal for nearly everything. AP better reflects the quality of finding the minority suspicious class.
+
+**Why is the MLP needed if it is not the top model?** It isolates the effect of the graph. If a graph-only perturbation changes the MLP score, that would indicate a benchmark problem; its invariance is also a useful lower-dependency reference.
+
+**Does PMP have the smallest performance drop?** No. It has the best *stressed score* but a larger unexpected graph-shift drop. This is exactly why both absolute performance and retention are reported.
+
+**Why include oracle scenarios at all?** They are controlled mechanism probes. They teach us how label-aligned topology can affect training, but the report explicitly excludes them from operational rankings because they use privileged labels in construction.
+
+**What would make the conclusion stronger?** More datasets, more independent splits and graph realizations, relation-aware model integrations, and non-oracle stress generators calibrated by achieved—not merely requested—structural change.
+
+---
+
+## Detailed technical report and evidence
+
 ## Abstract
 
 Graph-based fraud detection can use relationships that are missing from ordinary tabular data, but this also creates a weakness. A graph model can fail when fraud nodes look more normal, connect to benign nodes, or receive many irrelevant neighbors. My goal in this project was to measure that weakness in a controlled and reproducible way instead of reporting performance on only one clean graph.
 
 I built a robustness benchmark on YelpChi and compared four models: a feature-only MLP, GraphSAGE, a PMP adapter, and a SEC-GFD adapter. I tested five stress scenarios covering oracle and non-oracle rewiring, feature camouflage, relation camouflage, and random edge noise. I also used two evaluation protocols. In `train_on_variant`, a model was trained and tested on the same graph variant. In `train_clean_eval_all`, a model was trained only on the clean graph and then evaluated under graph or feature shift. The experiment used two train/validation/test allocations, three split seeds per allocation, two graph seeds, and five training seeds. It produced 5,040 complete and successful result rows.
 
-PMP had the best clean Average Precision, ROC-AUC, and macro-F1 in both allocation regimes. It also had the highest absolute score in every non-oracle maximum-stress comparison for all three metrics. At the same time, it lost more AP under unexpected graph shift than the MLP and SEC-GFD, which started from lower clean scores. This showed that high stressed performance and a small drop are different meanings of robustness. The MLP was exactly unchanged by graph-only stress, but it did not reach PMP's absolute performance.
+PMP had the best clean Average Precision, ROC-AUC, and macro-F1 in both allocation regimes. It also had the highest absolute score in every non-oracle maximum-stress comparison for all three metrics. At the same time, it lost more AP under unexpected graph shift than all three other models, which started from lower clean scores. This showed that high stressed performance and a small drop are different meanings of robustness. The MLP was exactly unchanged by graph-only stress, but it did not reach PMP's absolute performance.
 
 Feature camouflage was the most consistent weakness because it reduced the performance of every model. Oracle rewiring produced the largest protocol reversal: SEC-GFD reached almost perfect results when it was trained on label-constructed topology, but it fell to near-random ranking when a clean-trained model met the same topology. I treat this as a privileged diagnostic, not a deployment result. The overall conclusion is that PMP was the strongest integrated detector in this benchmark, while careful protocol labels, realized-change audits, and repeated seeds were necessary to understand what the scores actually meant.
 
@@ -20,9 +202,9 @@ Feature camouflage was the most consistent weakness because it reduced the perfo
 
 ### 1.1 Problem and motivation
 
-Fraud detection is often treated as a classification problem where each account, review, or transaction is judged from its own attributes. This misses an important part of the problem. Suspicious entities can share users, products, devices, payment methods, or other connections. A graph represents these relationships directly, so a graph neural network can use information from nearby nodes when it makes a prediction.
+Fraud detection is often treated as a classification problem where each account, review, or transaction is judged from its own attributes. This misses an important part of the problem. In YelpChi, suspicious reviews can share a user, product, rating, or month. A graph represents these relationships directly, so a graph neural network can use information from nearby nodes when it makes a prediction.
 
-That extra information is useful only when the neighborhood can be trusted. Fraud graphs are strongly imbalanced because most nodes are normal. A fraud node can therefore have many normal neighbors even without an attack. Fraudsters can also make their attributes look normal, or create links to benign entities so that their local structure looks less suspicious. Random and outdated links can add more noise. In these cases, ordinary message passing may mix useful and misleading information.
+That extra information is useful only when the neighborhood can be trusted. Fraud graphs are strongly imbalanced because most nodes are normal. A fraud node can therefore have many normal neighbors even without an attack. Fraudsters can also make their attributes look normal, or create links to benign entities so that their local structure looks less suspicious. Random or irrelevant links can add more noise. In these cases, ordinary message passing may mix useful and misleading information.
 
 This creates a practical question that clean test performance cannot answer: what happens after the node features or graph neighborhood become less reliable? A model can have a high clean score and still be sensitive to shift. Another model can have a small drop only because it uses little graph information in the first place. I wanted the benchmark to show both sides.
 
@@ -98,12 +280,12 @@ The graph cache was too large to keep all six split copies at once. The notebook
 
 ### 3.2 Dataset and graph representation
 
-I loaded YelpChi with `dgl.data.FraudDataset('yelp')` [8]. The source is a three-relation heterograph, but I converted it to one homogeneous graph with `dgl.to_homogeneous`. Every model therefore saw the same 8,051,348 directed relation-edge entries. This made the model comparison consistent, although it removed relation identities that the full PMP, SEC-GFD, CARE-GNN, or GAGA pipelines could use.
+I loaded YelpChi with `dgl.data.FraudDataset('yelp')` [8]. The source is a three-relation heterograph, but I converted it to one homogeneous graph with `dgl.to_homogeneous`. On the clean graph, all four executed models started from the same homogeneous view with 8,051,348 directed edge entries. Stress variants could rewire those entries or change the edge count. The shared view made the comparison consistent, although it removed relation identities that full PMP, CARE-GNN, or GAGA pipelines could use.
 
 | Dataset property | Executed value |
 |---|---:|
 | Nodes | 45,954 |
-| Directed edges | 8,051,348 |
+| Clean directed edge entries | 8,051,348 |
 | Features per node | 32 |
 | Positive nodes | 6,677 |
 | Negative nodes | 39,277 |
@@ -126,7 +308,7 @@ I used two train/validation/test allocations. Each allocation used the same thre
 
 The paired seeds make the allocation comparison more controlled, but it is not a pure learning curve. Moving from 40% to 60% training changes the validation and test membership as well as the test size. I therefore keep the two regimes separate and describe their difference as allocation sensitivity, not the causal gain from 20% more labels.
 
-For every positive-severity stress, I crossed graph seeds 0 and 1 with training seeds 0, 1, 2, 3, and 4. One allocation-level model/protocol/severity mean is therefore based on three splits, two graph realizations per split, and five optimization seeds per realization. The clean graph has five real optimization runs per split; repeated clean references in derived stress tables are not extra fits.
+For every positive-severity stress, I crossed graph seeds 0 and 1 with training seeds 0, 1, 2, 3, and 4. Within one allocation, each model/protocol/scenario/severity mean is therefore based on three splits, two graph realizations per split, and five optimization seeds per realization. The clean graph has five optimization runs per model, protocol, and split. Repeated clean references in derived stress tables are not extra fits.
 
 The graph ledger contains 186 rows, including clean aliases that are kept for audit traceability. The evaluated matrix contains 126 distinct clean or stressed graph states. Its size is:
 
@@ -178,7 +360,7 @@ Average Precision is my primary metric. It summarizes the precision-recall ranki
 
 The threshold was selected by maximizing macro-F1 on validation predictions and then frozen for the test set. Early stopping monitored validation ROC-AUC. This avoids choosing a threshold or epoch from test performance.
 
-Within a split, the reporting code resampled the crossed graph and training seeds. Clean-to-stress drops and protocol contrasts used paired resampling. Allocation-level summaries then resampled the three split-level means with 1,000 bootstrap samples. The resulting intervals are useful as descriptive split-sensitivity bands, but three split means are not enough for strong population claims or formal significance testing.
+Within a split, the reporting code resampled the crossed graph and training seeds. Clean-to-stress drops and protocol contrasts used paired resampling. Allocation-level summaries then resampled the three split-level means with 1,000 bootstrap samples. These intervals give a rough picture of variation across the three tested splits, but three split means are not enough for strong population claims or formal significance testing.
 
 For a performance drop, I use `clean metric - stressed metric`. A positive value is a loss. For a protocol contrast, I use `variant-trained metric - clean-trained-shift metric`. A positive value means retraining on the variant performed better.
 
@@ -221,7 +403,7 @@ This means the non-oracle scenario is a strong neighborhood-churn test but only 
 
 ![Realized perturbation audit](gfd-robustness-v4-factorial-report-r1/presentation/figure_3_realized_audit.png)
 
-Figure 1. Realized perturbations across the two allocation regimes. The allocation lines overlap because the same graph plan was intentionally reused across masks. Each panel uses a different audit unit, so the slopes should not be compared as if they were on one common scale. In the two camouflage panels, the plotted value is the effect on selected nodes; the number of selected nodes doubles from severity 0.15 to 0.30.
+Presentation figure 3. Realized perturbations across the two allocation regimes. The allocation lines overlap because the same graph plan was intentionally reused across masks. Each panel uses a different audit unit, so the slopes should not be compared as if they were on one common scale. In the two camouflage panels, the plotted value is the effect on selected nodes; the number of selected nodes doubles from severity 0.15 to 0.30.
 
 ### 4.3 Clean performance
 
@@ -257,6 +439,8 @@ The main deployment-style comparison uses only non-oracle rewiring and uniform e
 | 60, variant | Non-oracle rewiring 0.30 | 0.4240 (+0.0000) | 0.3782 (+0.0120) | 0.5321 (+0.0504) | 0.4655 (-0.0075) |
 | 60, variant | Uniform edge noise 0.20 | 0.4240 (+0.0000) | 0.3778 (+0.0124) | 0.5355 (+0.0470) | 0.4675 (-0.0095) |
 
+I keep this headline table to means and drops so it stays readable. The linked CSV contains the paired descriptive intervals; because they are based on only three split means, I do not treat them as formal significance tests.
+
 PMP had the highest stressed AP in all eight rows. The same winner pattern held for ROC-AUC and macro-F1. Across both positive severities, it also won every aggregate operational AP comparison. At maximum stress, its AP lead over the best non-PMP model was between 0.0420 and 0.0787, and the lead was positive in all three split replicates for every row.
 
 PMP did not have the smallest drop. Under unexpected non-oracle rewiring it lost 0.0704 AP in the 40% regime and 0.0803 in the 60% regime. Under edge noise it lost 0.0491 and 0.0538. SEC-GFD and GraphSAGE had smaller shift losses, while the MLP had exactly zero graph-only loss because it never reads the graph.
@@ -281,7 +465,7 @@ The heatmap below gives a compact view of maximum-stress AP drops over all five 
 
 ![Maximum-stress Average Precision drop heatmap](gfd-robustness-v4-factorial-report-r1/presentation/figure_2_ap_drop_heatmap.png)
 
-Figure 2. Maximum-stress AP drop by allocation, protocol, scenario, and model. The extreme SEC-GFD values under oracle rewiring set most of the color range, so the smaller operational differences look visually pale. For this reason I use the numeric non-oracle table above as the main operational result.
+Presentation figure 2. Maximum-stress AP drop by allocation, protocol, scenario, and model. The extreme SEC-GFD values under oracle rewiring set most of the color range, so the smaller operational differences look visually pale. For this reason I use the numeric non-oracle table above as the main operational result.
 
 Across all five maximum-severity scenarios, PMP won 16 of the 20 allocation-by-protocol rows. The exceptions were all oracle rewiring: MLP won the two clean-trained shift rows because it ignored the graph, and SEC-GFD won the two variant-trained rows by learning the label-constructed topology. The AP, ROC-AUC, and macro-F1 winner patterns were identical.
 
@@ -304,7 +488,7 @@ This is not evidence that SEC-GFD is perfectly robust. The topology was construc
 
 ![Selected AP curves for oracle rewiring and feature camouflage](gfd-robustness-v4-factorial-report-r1/presentation/figure_1_ap_curves.png)
 
-Figure 3. Selected Average Precision curves. The feature-camouflage panels show steady degradation. The oracle-rewiring panels show the opposite outcomes of matched variant training and unexpected clean-to-stress shift. These are oracle-assisted diagnostics, so this figure supports mechanism discussion rather than the operational ranking.
+Presentation figure 1. Selected Average Precision curves. The feature-camouflage panels show steady degradation. The oracle-rewiring panels show the opposite outcomes of matched variant training and unexpected clean-to-stress shift. These are oracle-assisted diagnostics, so this figure supports mechanism discussion rather than the operational ranking.
 
 ### 4.8 Training-seed, graph-seed, and split stability
 
@@ -331,17 +515,17 @@ More training data did not remove graph sensitivity. PMP's mean maximum operatio
 
 ### 4.10 Comparison with the related research
 
-PMP's clean and operational lead is consistent with its motivation: separating the influence of mixed fraud, normal, and unlabeled neighbors can be more useful than one shared mean aggregator on a dense and imbalanced graph. At the same time, its larger shift losses show that effective use of the graph is not the same as invariance. This is a result about my integrated PMP adapter, not a numerical reproduction of the ICLR paper.
+The PMP adapter's clean and operational lead fits the type of mixed-neighborhood problem PMP was designed for [5], but this run does not isolate partitioning as the cause. Its larger shift losses also show that effective use of the graph is not the same as invariance. This is a result about my integrated PMP adapter, not a numerical reproduction of the ICLR paper.
 
-SEC-GFD's small non-oracle losses are directionally consistent with a model designed around heterophily and mixed-frequency graph information. Its oracle reversal says something different. It shows sensitivity to training on a label-coded structural regime, not confirmation or rejection of the original SEC-GFD results.
+SEC-GFD was designed around heterophily and mixed-frequency graph information [6], and its small non-oracle losses fit that goal. This run does not isolate its filter or constraint as the reason. Its oracle reversal says something different: it shows sensitivity to training on a label-coded structural regime, not confirmation or rejection of the original SEC-GFD results.
 
-The feature-camouflage result supports the problem described by CARE-GNN: copying normal-looking attributes can damage models even when they also have graph information. Relation camouflage was milder here, but CARE-GNN was not run, so I cannot claim whether its neighbor selection would have helped. GAGA was also not run. The weak achieved true-label shift from my non-oracle rewiring means that a stronger, calibrated heterophily test would be needed before using this benchmark to compare GAGA's grouping strategy.
+The feature-camouflage result supports the problem described by CARE-GNN [3]: copying normal-looking attributes can damage models even when they also have graph information. Relation camouflage was milder here, but CARE-GNN was not run, so I cannot claim whether its neighbor selection would have helped. GAGA [4] was also not run. The weak achieved true-label shift from my non-oracle rewiring means that a stronger, calibrated heterophily test would be needed before using this benchmark to compare GAGA's grouping strategy.
 
-The GraphSAGE seed collapse gives the clearest connection to Pitfalls of GNN Evaluation. Model order changed when one prespecified initialization was omitted. The repeated design protected the report from choosing only a successful baseline run. This was not just a statistical detail; it changed the scientific interpretation.
+The GraphSAGE seed collapse gives the clearest connection to Pitfalls of GNN Evaluation [7]. Model order changed when one prespecified initialization was omitted. The repeated design protected the report from choosing only a successful baseline run. This was not just a statistical detail; it changed the interpretation.
 
 ### 4.11 Lessons learned
 
-The first lesson is that robustness needs more than one number. Clean performance, stressed performance, drop, and retention answer different questions. PMP led in usable performance, while MLP led in graph invariance. Both statements are true.
+The first lesson is that robustness needs more than one number. Clean performance, stressed performance, drop, and retention answer different questions. PMP led in absolute benchmark performance, while MLP led in graph invariance. Both statements are true.
 
 The second lesson is that the protocol is part of the result. Training on a known changed graph can recover performance for PMP and SEC-GFD, but that does not describe a model that faces an unexpected shift. Oracle rewiring made this difference extremely large.
 
@@ -357,9 +541,11 @@ This experiment is broad inside one dataset, but it is still only one static Yel
 
 The statistical replication is also limited. There are three split seeds and two independent graph seeds, and the same graph plans are reused across split masks. The cross-split intervals are descriptive. There was no formal multiple-testing plan, and two positive severity levels per scenario cannot describe a complicated dose-response curve.
 
-The homogeneous graph makes the comparison fair at one level, but it weakens model fidelity. PMP and SEC-GFD were designed with richer structural ideas, and both were adapted to the common view. CARE-GNN and GAGA were not integrated. The results should therefore be described as adapter results under this benchmark. The models also did not receive one matched hyperparameter-search budget, so score differences cannot be explained by architecture alone.
+The homogeneous graph makes the comparison consistent, but the integrations are not full paper reproductions. It removes relation identities used by PMP and other relation-aware methods. SEC-GFD used a reduced-cost configuration and compatibility changes even though its native loader also uses a homogeneous graph. CARE-GNN and GAGA were not integrated. The results should therefore be described as adapter results under this benchmark. The models also did not receive one matched hyperparameter-search budget, so score differences cannot be explained by architecture alone.
 
 The setup is transductive. Graph models can use test-node features and topology while passing messages, although test labels are hidden from fitting and selection. The non-oracle two-means partition also uses features from all nodes. CUDA kernels were seeded but not forced to be bitwise deterministic, and PMP samples neighborhoods during validation and testing. These details do not invalidate the comparison, but they are part of its reproducibility boundary.
+
+The light evidence package keeps the results, audits, summaries, logs, configs, and hashes, but it leaves out the downloaded dataset, graph binaries, isolated runtime, and upstream clones. Reproduction therefore requires downloading and regenerating those parts. The saved evidence supports logical traceability, not byte-for-byte checking of every executed graph.
 
 The highest-value next steps are supported by what I observed in this run.
 
@@ -382,7 +568,7 @@ I would keep the operational and oracle results separate in every future report.
 
 I built and completed a controlled robustness benchmark for graph-based fraud detection on YelpChi. The final experiment crossed four models, five stress families, two protocols, two allocation regimes, three split seeds, two graph seeds, and five training seeds. All 5,040 expected evaluations completed successfully and were linked to audit, summary, provenance, and hash records.
 
-The integrated PMP adapter was the strongest model in absolute terms. It had the best clean AP, ROC-AUC, and macro-F1, and it stayed first in every non-oracle stressed comparison for all three metrics. However, it also lost more performance under sudden graph shift than the lower-performing MLP and SEC-GFD. This is why I do not reduce robustness to the smallest drop. A model can depend on the graph, lose part of that benefit, and still remain the best model after the shift.
+The integrated PMP adapter was the strongest model in absolute terms. It had the best clean AP, ROC-AUC, and macro-F1, and it stayed first in every non-oracle stressed comparison for all three metrics. However, it also lost more performance under sudden graph shift than all three lower-performing alternatives. This is why I do not reduce robustness to the smallest drop. A model can depend on the graph, lose part of that benefit, and still remain the best model after the shift.
 
 Feature camouflage was the broadest shared weakness. Fully replacing selected positive-node features harmed every architecture. Relation camouflage had a smaller effect at the tested bounded budget. Non-oracle rewiring created large neighborhood churn but only a small true-label heterophily increase, which limits the strength of the heterophily claim.
 
