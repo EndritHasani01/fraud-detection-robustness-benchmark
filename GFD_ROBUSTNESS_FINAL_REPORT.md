@@ -6,7 +6,7 @@ Final project report, 13 July 2026
 
 The values in this report come from the executed notebook [KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb](KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb) and the evidence package [gfd-robustness-v4-factorial-report-r1](gfd-robustness-v4-factorial-report-r1/). I round values in the text and tables for readability. The CSV files in the evidence package keep the full precision.
 
-## Oral presentation script (12–15 minutes)
+## Oral presentation script (12–20 minutes)
 
 ### Slide 1 — The question behind the project
 
