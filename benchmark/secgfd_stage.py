@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ from .results import (
     write_result_row,
 )
 from .summarize import summarize_results_by_training_seed
-from .variants import VariantRow, filter_variants, load_graph_bin, require_variants_csv_rows, set_seeds
+from .variants import filter_variants, load_graph_bin, require_variants_csv_rows, set_seeds
 
 SECGFD_DEFAULT_HPARAMS = {
     "hid_dim": 32,
@@ -51,6 +52,11 @@ class SECGFDModelArtifact:
     lemda: float
     lr: float
     weight_decay: float
+    epochs_trained: int = 0
+    best_epoch: int = 0
+    best_validation_monitor: float | None = None
+    validation_monitor: str = "roc_auc"
+    stopping_reason: str = "max_epochs"
 
 
 def _coerce_positive_int(value: Any, *, name: str) -> int:
@@ -215,10 +221,18 @@ def _nce_loss_fixed(emb, features, labels, train_idx, *, eps: float = 1e-8):
     if int(normal_mask.sum().item()) == 0 or int(anomaly_mask.sum().item()) == 0:
         return torch.tensor(0.0, device=features.device)
 
-    sim = F.cosine_similarity(features, emb, dim=1)
-    nor = sim[train_idx[normal_mask]].mean()
-    abn = sim[train_idx[anomaly_mask]].mean()
-    return -torch.log((nor + float(eps)) / (abn + float(eps)))
+    # Cosine similarity is in [-1, 1], while the original log-ratio assumes
+    # positive inputs. Shift into [0, 1] so valid negative cosine values cannot
+    # turn the loss into NaN.
+    sim = (F.cosine_similarity(features, emb, dim=1) + 1.0) * 0.5
+    nor = sim[train_idx[normal_mask]].mean().clamp_min(float(eps))
+    abn = sim[train_idx[anomaly_mask]].mean().clamp_min(float(eps))
+    loss = -torch.log(nor / abn)
+    if not bool(torch.isfinite(loss).item()):
+        raise RuntimeError(
+            f"SEC-GFD contrastive loss became non-finite (normal={float(nor)}, anomaly={float(abn)})."
+        )
+    return loss
 
 
 def _resolve_secgfd_graph_device(g, *, device: str):
@@ -227,14 +241,17 @@ def _resolve_secgfd_graph_device(g, *, device: str):
     if device not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
     if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
+        raise RuntimeError(
+            "CUDA was requested for SEC-GFD training, but PyTorch reports that CUDA is unavailable."
+        )
 
     if device == "cuda":
         try:
             g = g.to("cuda")
-        except Exception:
-            device = "cpu"
-            g = g.to("cpu")
+        except Exception as exc:
+            raise RuntimeError(
+                "CUDA was requested for SEC-GFD, but the graph could not be moved to CUDA."
+            ) from exc
     else:
         g = g.to("cpu")
     return g, str(device)
@@ -321,8 +338,13 @@ def train_secgfd_model(
     best_monitor = -float("inf")
     best_state = None
     bad_epochs = 0
+    best_epoch = 0
+    epochs_trained = 0
+    best_monitor_name = "roc_auc"
+    stopping_reason = "max_epochs"
 
     for _epoch in range(int(epochs)):
+        epochs_trained = int(_epoch) + 1
         model.train()
         logits, emb = model(features)
 
@@ -339,15 +361,23 @@ def train_secgfd_model(
             val_scores = probs[val_idx].detach().cpu().numpy()
             val_labels = labels[val_idx].detach().cpu().numpy()
             val_auc = roc_auc_binary(val_labels, val_scores)
-            monitor = float(val_auc) if math.isfinite(val_auc) else -float(loss_ce.item())
+            if math.isfinite(val_auc):
+                monitor = float(val_auc)
+                monitor_name = "roc_auc"
+            else:
+                monitor = -float(loss_ce.item())
+                monitor_name = "negative_cross_entropy"
 
         if monitor > best_monitor:
             best_monitor = monitor
+            best_monitor_name = monitor_name
+            best_epoch = int(_epoch) + 1
             best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
             bad_epochs = 0
         else:
             bad_epochs += 1
             if es_patience > 0 and bad_epochs >= es_patience:
+                stopping_reason = "early_stopping"
                 opt.step()
                 break
 
@@ -369,13 +399,18 @@ def train_secgfd_model(
         repo_root=repo_root,
         state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
         threshold=float(th.threshold),
-        device=str(device),
+        device=str(effective_device),
         hid_dim=int(hid_dim),
         order_d=int(order_d),
         high_order=int(high_order),
         lemda=float(lemda),
         lr=float(lr),
         weight_decay=float(weight_decay),
+        epochs_trained=int(epochs_trained),
+        best_epoch=int(best_epoch),
+        best_validation_monitor=(float(best_monitor) if math.isfinite(best_monitor) else None),
+        validation_monitor=str(best_monitor_name),
+        stopping_reason=str(stopping_reason),
     )
 
 
@@ -432,6 +467,11 @@ def eval_secgfd_model(
         "f1_macro": float(f1m),
         "threshold": use_threshold,
         "duration_sec": float(time.perf_counter() - t0),
+        "epochs_trained": int(artifact.epochs_trained),
+        "best_epoch": int(artifact.best_epoch),
+        "best_validation_monitor": artifact.best_validation_monitor,
+        "validation_monitor": artifact.validation_monitor,
+        "stopping_reason": artifact.stopping_reason,
     }
 
 
@@ -592,6 +632,7 @@ def run_secgfd_stage(
         try:
             g = load_graph_bin(Path(v.graph_path))
         except Exception as e:
+            traceback.print_exc()
             dt = time.perf_counter() - graph_t0
             for training_seed, run_key in pending_runs:
                 write_result_row(
@@ -652,6 +693,7 @@ def run_secgfd_stage(
                     roc_auc=float(out["roc_auc"]),
                 )
             except Exception as e:
+                traceback.print_exc()
                 dt = time.perf_counter() - run_t0
                 write_result_row(
                     results_csv,
@@ -679,4 +721,5 @@ def run_secgfd_stage(
         results_csv,
         out_csv_path=out_dir / "results_summary_secgfd.csv",
         model_ids={"secgfd"},
+        protocols={PROTOCOL_TRAIN_ON_VARIANT},
     )

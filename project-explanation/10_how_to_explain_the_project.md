@@ -1,0 +1,34 @@
+# How To Explain The Project
+
+The easiest way to explain this project is to separate the explanation into three layers: the problem, the benchmark design, and the implementation. The problem is that graph fraud detection models may fail when the graph becomes noisy, heterophilic, or camouflaged. The benchmark design is to create controlled stressed versions of a real fraud graph and measure performance degradation. The implementation is a staged Python harness that caches graph variants, trains models, logs unified results, audits perturbations, and creates report-ready plots.
+
+For a non-technical audience, start with the testing-lab analogy. Say that the project takes a fraud detection dataset and places it under controlled stress. It does not claim to recreate every behavior of real fraudsters. Instead, it asks what happens when the graph becomes less reliable in specific ways. Then explain that the output is not just one accuracy number, but a set of curves showing how performance changes as stress increases.
+
+For a technical audience, start with the node-classification setup. Say that YelpChi is loaded through DGL, masks are deterministically generated, graph perturbations are controlled by graph seeds, training variance is controlled by training seeds, and results are keyed by dataset, split, scenario, severity, graph seed, training seed, model, and protocol. This immediately shows that the benchmark is designed for reproducibility and fair comparison.
+
+When explaining why the MLP is included, do not describe it as a weak model added only for completeness. Explain that it is a feature-only control. If a graph-only perturbation changes MLP results under `train_clean_eval_all`, that would be suspicious because the MLP does not use graph edges. If feature camouflage hurts the MLP, that makes sense because the features were changed. This is one of the cleanest sanity checks in the benchmark.
+
+When explaining GraphSAGE, describe it as the standard message passing baseline. It aggregates neighbor information, so it should be more sensitive than the MLP to graph structure. This makes it a useful reference for seeing whether a specialized fraud model is actually more robust than a normal GNN.
+
+When explaining PMP, keep the paper-level idea concise. PMP is included because graph fraud detection has label imbalance and mixed homophily/heterophily. PMP tries to partition neighbor information by label knowledge and aggregate different neighbor groups differently. In the benchmark, the PMP research code is adapted so it uses the same cached graphs, masks, metrics, seeds, and result schema as the other models.
+
+When explaining SEC-GFD, emphasize heterophily and spectral filtering. SEC-GFD is included because it was designed for graph fraud detection under heterophily from a spectral perspective. In the benchmark, the adapter imports the research model, applies benchmark-side hyperparameters, trains with validation monitoring, and writes the same output columns as every other model.
+
+When explaining stress scenarios, use the same pattern every time. First state what it changes. Then state why that change matters for fraud detection. Then state how the implementation applies it. For example, heterophily rewiring changes edge destinations, matters because misleading neighbors can hurt message passing, and is implemented by selecting edges and rewiring them toward opposite-label or pseudo-opposite targets under a shared sampling policy.
+
+When explaining oracle scenarios, be direct. Oracle means the perturbation uses true labels during construction. That is not realistic as an attacker model, but it is useful as a controlled stress test because it creates a clear and strong failure condition. The benchmark discloses oracle status in configs, graph ledgers, audit rows, summary CSVs, and plots. The safe wording is "controlled oracle stress test," not "realistic attack."
+
+When explaining the two protocols, do not rush. `train_on_variant` means the model is trained and tested on the same stressed variant, so it measures adaptation under stressed training conditions. `train_clean_eval_all` means the model is trained once on clean data and evaluated on stressed variants, so it measures test-time shift robustness. The same curve can mean different things under these protocols, so the protocol must always be visible.
+
+When explaining outputs, use the evidence chain. `graph_variants.csv` says which graph was evaluated. `variant_audit.csv` says what changed in that graph. `results.csv` says how the model performed. The plots stage joins and summarizes those files. This is better than saying "the code makes plots," because it explains why the intermediate CSVs matter.
+
+When discussing limitations, frame them as scope boundaries rather than apologies. The benchmark is static, not temporal. Some scenarios are oracle, not realistic attacks. Severity values are scenario-specific and not directly comparable across families. The main configs focus on YelpChi. Relation camouflage can be mild on a dense graph. These limitations do not make the benchmark useless. They define the claims it can responsibly support.
+
+If someone asks what the strongest contribution is, say that the project turns several fraud detection methods and stress-test ideas into one reproducible evaluation harness. The value is not only that it runs models. The value is that every model is evaluated against the same cached variants, with decoupled graph and training seeds, unified result rows, protocol-aware reporting, and perturbation audits.
+
+If someone asks how you know the perturbations worked, point to `variant_audit.csv` and `plots/audit_curves.csv`. A trustworthy explanation should not say only that severity was `0.3`. It should say what was actually realized, such as how many edges were rewired, how much heterophily increased, how many fraud-node features changed, or how much fraud-to-normal neighbor ratio shifted.
+
+If someone asks how you know there is no test leakage, explain that F1 thresholds are selected from validation scores and then applied to test scores. Also explain that train, validation, and test masks are created once per split and preserved across variants. This keeps test data reserved for evaluation and prevents different stress levels from using different split definitions.
+
+A concise presentation flow could be: "We start with YelpChi, fix the split, and cache graph variants. We create variants for heterophily, camouflage, and noise with deterministic graph seeds. We evaluate MLP, GraphSAGE, PMP, and SEC-GFD under standard per-variant training and clean-train shift protocols. We record every run in one results table and record every perturbation in an audit table. The report uses both tables so performance claims are tied to realized graph changes."
+

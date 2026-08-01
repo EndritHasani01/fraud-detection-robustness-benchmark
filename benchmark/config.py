@@ -74,6 +74,8 @@ def _validated_seed_list(
         if isinstance(raw, bool) or not isinstance(raw, int):
             raise ConfigError(f"seeds.{key}[{idx}] must be an integer")
         out.append(int(raw))
+    if len(out) != len(set(out)):
+        raise ConfigError(f"seeds.{key} must not contain duplicate values")
     return out
 
 
@@ -236,6 +238,28 @@ def _validate_scenario_cfg(scenario_cfg: dict[str, Any], *, idx: int) -> None:
         value = scenario_cfg.get("camouflage_edges_per_node")
         if isinstance(value, bool) or not isinstance(value, int) or int(value) <= 0:
             raise ConfigError(f"{prefix}.camouflage_edges_per_node must be an integer >= 1")
+    if "camouflage_edge_degree_ratio" in scenario_cfg:
+        ratio = _require_non_negative_number(
+            scenario_cfg.get("camouflage_edge_degree_ratio"),
+            path=f"{prefix}.camouflage_edge_degree_ratio",
+        )
+        if ratio <= 0.0:
+            raise ConfigError(f"{prefix}.camouflage_edge_degree_ratio must be > 0")
+        if "camouflage_edges_per_node" in scenario_cfg:
+            raise ConfigError(
+                f"{prefix} must set only one of camouflage_edges_per_node or camouflage_edge_degree_ratio"
+            )
+    for key in ("camouflage_min_edges_per_node", "camouflage_max_edges_per_node"):
+        if key in scenario_cfg:
+            value = scenario_cfg.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or int(value) <= 0:
+                raise ConfigError(f"{prefix}.{key} must be an integer >= 1")
+    min_edges = int(scenario_cfg.get("camouflage_min_edges_per_node", 1) or 1)
+    max_edges = scenario_cfg.get("camouflage_max_edges_per_node")
+    if max_edges is not None and int(max_edges) < min_edges:
+        raise ConfigError(
+            f"{prefix}.camouflage_max_edges_per_node must be >= camouflage_min_edges_per_node"
+        )
     if "remove_suspicious_ratio" in scenario_cfg:
         ratio = _require_non_negative_number(
             scenario_cfg.get("remove_suspicious_ratio"),
@@ -249,6 +273,15 @@ def _validate_scenario_cfg(scenario_cfg: dict[str, Any], *, idx: int) -> None:
             raise ConfigError(f"{prefix}.gamma must be <= 1")
     if "undirected" in scenario_cfg:
         _require_bool(scenario_cfg.get("undirected"), path=f"{prefix}.undirected")
+    if "fixed_feature_partition_across_severity" in scenario_cfg:
+        _require_bool(
+            scenario_cfg.get("fixed_feature_partition_across_severity"),
+            path=f"{prefix}.fixed_feature_partition_across_severity",
+        )
+    if "relation_allocation" in scenario_cfg:
+        relation_allocation = str(scenario_cfg.get("relation_allocation", "")).strip().lower()
+        if relation_allocation not in {"uniform", "proportional"}:
+            raise ConfigError(f"{prefix}.relation_allocation must be 'uniform' or 'proportional'")
 
     for key in ("allow_self_loops", "reject_existing", "reject_duplicates"):
         if key in scenario_cfg:
@@ -271,6 +304,46 @@ def _validate_evaluation_cfg(eval_cfg: dict[str, Any]) -> None:
         _require_bool(eval_cfg.get("export_variant_audit"), path="evaluation.export_variant_audit")
     if "audit_metrics" in eval_cfg:
         _validate_string_list(eval_cfg.get("audit_metrics"), path="evaluation.audit_metrics")
+
+
+def _validate_datasets(datasets: list[Any]) -> None:
+    dataset_ids: list[str] = []
+    for idx, dataset_cfg in enumerate(datasets):
+        prefix = f"cfg['datasets'][{idx}]"
+        if not isinstance(dataset_cfg, dict):
+            raise ConfigError(f"{prefix} must be an object")
+        dataset_ids.append(_require_non_empty_string(dataset_cfg.get("dataset_id"), path=f"{prefix}.dataset_id"))
+        _require_non_empty_string(dataset_cfg.get("source_name"), path=f"{prefix}.source_name")
+    if len(dataset_ids) != len(set(dataset_ids)):
+        raise ConfigError("cfg['datasets'] must use unique dataset_id values")
+
+
+def _validate_data_splits(data_splits: list[Any]) -> None:
+    split_ids: list[str] = []
+    split_definitions: list[tuple[int, float, float]] = []
+    for idx, split_cfg in enumerate(data_splits):
+        prefix = f"cfg['data_splits'][{idx}]"
+        if not isinstance(split_cfg, dict):
+            raise ConfigError(f"{prefix} must be an object")
+        split_ids.append(_require_non_empty_string(split_cfg.get("split_id"), path=f"{prefix}.split_id"))
+
+        split_seed = split_cfg.get("split_seed")
+        if isinstance(split_seed, bool) or not isinstance(split_seed, int):
+            raise ConfigError(f"{prefix}.split_seed must be an integer")
+        train_size = _require_non_negative_number(split_cfg.get("train_size"), path=f"{prefix}.train_size")
+        val_size = _require_non_negative_number(split_cfg.get("val_size"), path=f"{prefix}.val_size")
+        if train_size <= 0.0 or val_size <= 0.0:
+            raise ConfigError(f"{prefix}.train_size and {prefix}.val_size must both be > 0")
+        if train_size + val_size >= 1.0:
+            raise ConfigError(f"{prefix}.train_size + {prefix}.val_size must be < 1")
+        split_definitions.append((int(split_seed), float(train_size), float(val_size)))
+
+    if len(split_ids) != len(set(split_ids)):
+        raise ConfigError("cfg['data_splits'] must use unique split_id values")
+    if len(split_definitions) != len(set(split_definitions)):
+        raise ConfigError(
+            "cfg['data_splits'] must not repeat the same split_seed/train_size/val_size definition"
+        )
 
 
 def validate_config(cfg: dict[str, Any]) -> None:
@@ -297,6 +370,10 @@ def validate_config(cfg: dict[str, Any]) -> None:
     if not isinstance(cfg["scenarios"], list) or not cfg["scenarios"]:
         raise ConfigError("cfg['scenarios'] must be a non-empty list")
 
+    _require_non_empty_string(cfg.get("experiment_name"), path="cfg['experiment_name']")
+    _validate_datasets(cfg["datasets"])
+    _validate_data_splits(cfg["data_splits"])
+
     graph_rep = cfg["graph_representation"]
     if not isinstance(graph_rep, dict):
         raise ConfigError("cfg['graph_representation'] must be an object")
@@ -315,17 +392,28 @@ def validate_config(cfg: dict[str, Any]) -> None:
     _validated_seed_list(seeds, key="training_seeds", required=True)
     _validated_seed_list(seeds, key="graph_seeds", required=False)
 
+    model_ids: list[str] = []
     for idx, model_cfg in enumerate(cfg["models"]):
         if not isinstance(model_cfg, dict):
             raise ConfigError(f"cfg['models'][{idx}] must be an object")
-        if not str(model_cfg.get("model_id", "")).strip():
-            raise ConfigError(f"cfg['models'][{idx}].model_id must be a non-empty string")
+        model_ids.append(_require_non_empty_string(model_cfg.get("model_id"), path=f"cfg['models'][{idx}].model_id"))
         _validate_model_hparams(model_cfg)
+    if len(model_ids) != len(set(model_ids)):
+        raise ConfigError("cfg['models'] must use unique model_id values")
 
+    scenario_ids: list[str] = []
     for idx, scenario_cfg in enumerate(cfg["scenarios"]):
         if not isinstance(scenario_cfg, dict):
             raise ConfigError(f"cfg['scenarios'][{idx}] must be an object")
         _validate_scenario_cfg(scenario_cfg, idx=idx)
+        scenario_ids.append(str(scenario_cfg["scenario_id"]).strip())
+        severities = [float(value) for value in scenario_cfg["severity_values"]]
+        if len(severities) != len(set(severities)):
+            raise ConfigError(f"cfg['scenarios'][{idx}].severity_values must not contain duplicates")
+        if 0.0 not in severities:
+            raise ConfigError(f"cfg['scenarios'][{idx}].severity_values must include 0.0")
+    if len(scenario_ids) != len(set(scenario_ids)):
+        raise ConfigError("cfg['scenarios'] must use unique scenario_id values")
 
     eval_cfg = cfg["evaluation"]
     if not isinstance(eval_cfg, dict):

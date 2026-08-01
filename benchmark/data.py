@@ -75,9 +75,10 @@ def load_dgl_fraud_dataset(dataset_id: str, source_name: str, raw_dir: Path, *, 
     try:
         from dgl.data.fraud import FraudDataset
     except Exception as e:  # pragma: no cover
+        detail = f"{type(e).__name__}: {e}"
         raise RuntimeError(
-            "DGL FraudDataset is required. Install dgl and torch in a compatible Python environment "
-            "(Python 3.10/3.11 is the safest choice for ML wheels)."
+            "DGL FraudDataset could not be imported. Verify the DGL/PyTorch wheel pair and its "
+            f"native CUDA libraries. Original import failure: {detail}"
         ) from e
 
     ds = FraudDataset(name=source_name, raw_dir=str(raw_dir), force_reload=bool(force_reload))

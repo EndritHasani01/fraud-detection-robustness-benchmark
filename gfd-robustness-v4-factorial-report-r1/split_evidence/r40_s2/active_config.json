@@ -1,0 +1,260 @@
+{
+  "created_date": "2026-07-13",
+  "data_splits": [
+    {
+      "policy": "Baseline allocation, preregistered split seed 3253.",
+      "split_id": "r40_s2",
+      "split_regime_id": "train40_val20_test40",
+      "split_seed": 3253,
+      "train_size": 0.4,
+      "val_size": 0.2
+    }
+  ],
+  "datasets": [
+    {
+      "dataset_id": "yelpchi",
+      "notes": "YelpChi as exposed by DGL FraudDataset.",
+      "source": "dgl.data.FraudDataset",
+      "source_name": "yelp"
+    }
+  ],
+  "design": {
+    "allocation_regimes": [
+      "train40_val20_test40",
+      "train60_val20_test20"
+    ],
+    "execution_policy": "Process one data split at a time, archive its ledger/audit/results, then evict graph binaries before materializing the next split.",
+    "split_seeds_per_regime": [
+      717,
+      1729,
+      3253
+    ],
+    "type": "factorial_split_seed_by_allocation_regime"
+  },
+  "disclosures": [
+    "Oracle train-on-variant rows expose label-constructed graph structure during training and are privileged-label diagnostics, not deployment robustness estimates.",
+    "All model adapters evaluate the shared homogeneous graph; PMP and SEC-GFD results must be described as benchmark-adapter results.",
+    "Allocation-regime summaries are stratified; 40/20/40 and 60/20/20 rows must never be pooled into one cross-split interval.",
+    "The same graph seed intentionally produces the same perturbation plan across split masks, isolating split/training effects from graph construction.",
+    "This benchmark is a static controlled stress evaluation, not a realistic adversarial fraud simulation."
+  ],
+  "evaluation": {
+    "audit_metrics": [
+      "n_rewired_edges_actual",
+      "heterophily_ratio_before",
+      "heterophily_ratio_after",
+      "mean_cosine_to_sampled_normal_before",
+      "mean_cosine_to_sampled_normal_after",
+      "fraud_to_normal_neighbor_ratio_before",
+      "fraud_to_normal_neighbor_ratio_after",
+      "n_added_edge_pairs_actual"
+    ],
+    "export_variant_audit": true,
+    "metrics": [
+      "roc_auc",
+      "average_precision",
+      "f1_macro"
+    ],
+    "no_test_leakage": true,
+    "no_test_leakage_scope": "Model fitting, early stopping, hyperparameter selection, and threshold selection do not read test outcomes; controlled oracle perturbation construction is the explicitly disclosed exception.",
+    "oracle_perturbation_label_scope": "all_nodes_including_test",
+    "reporting": [
+      "mean",
+      "std",
+      "crossed_seed_ci",
+      "split_bootstrap_by_allocation_regime"
+    ],
+    "threshold_selection": "best_f1_on_validation"
+  },
+  "experiment_name": "gfd_robustness_benchmark_v4_factorial",
+  "graph_representation": {
+    "canonical_view": "homogeneous",
+    "conversion": "dgl.to_homogeneous",
+    "from_source_view": "heterograph",
+    "rationale": "Keep the shared v3 evaluation view so split, allocation, and graph-seed sensitivity remain comparable with R6."
+  },
+  "models": [
+    {
+      "category": "baseline",
+      "input": "node_features_only",
+      "model_id": "mlp",
+      "type": "mlp"
+    },
+    {
+      "category": "baseline",
+      "input": "graph_plus_node_features",
+      "model_id": "sage",
+      "type": "graphsage"
+    },
+    {
+      "category": "specialized",
+      "hparams": {
+        "batch_size": 512,
+        "epochs": 100,
+        "full_neighbors": false,
+        "num_workers": 0,
+        "patience": 10,
+        "sampled_neighbors": [
+          10
+        ]
+      },
+      "model_id": "pmp",
+      "notes": "Feasibility adapter; this is not the paper's full relation-aware configuration.",
+      "repo_path": "Repos/PMP-master",
+      "type": "pmp"
+    },
+    {
+      "category": "specialized",
+      "hparams": {
+        "hid_dim": 32,
+        "high_order": 1,
+        "lemda": 0.2,
+        "lr": 0.01,
+        "order_d": 2,
+        "weight_decay": 0.0
+      },
+      "model_id": "secgfd",
+      "notes": "Reduced-cost benchmark configuration retained for comparability with R6.",
+      "repo_path": "Repos/SEC-GFD-main",
+      "type": "sec_gfd"
+    }
+  ],
+  "project_topic": "Fraud detection using graphs (node-level anomaly/fraud classification)",
+  "research_purpose": "Test whether the v3 findings survive independent split seeds, two graph perturbation realizations, five optimization seeds, and a paired training-allocation sensitivity analysis.",
+  "scenarios": [
+    {
+      "allow_self_loops": false,
+      "family": "heterophily",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "rewire_edge_dst_to_opposite_label",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "heterophily",
+      "scenario_id": "heterophily_rewire_oracle",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "family": "heterophily",
+      "fixed_feature_partition_across_severity": true,
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "rewire_edge_dst_to_feature_pseudo_opposite_label",
+      "oracle_labels": false,
+      "oracle_mode": "non_oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "heterophily",
+      "scenario_id": "heterophily_rewire_nonoracle",
+      "severity_param": "p_rewire",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "family": "camouflage_feature",
+      "gamma": 1.0,
+      "graph_view_mode": "canonical",
+      "method": "replace_fraud_features_with_normal_features",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "scenario_group": "camouflage",
+      "scenario_id": "camouflage_feature_oracle",
+      "severity_param": "p_cam_feat",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "camouflage_edge_degree_ratio": 0.25,
+      "camouflage_max_edges_per_node": 64,
+      "camouflage_min_edges_per_node": 4,
+      "family": "camouflage_relation",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "add_relation_camouflage_edges",
+      "notes": "Bound benign-looking additions to 25% of each selected fraud node's out-degree, with 4/64 edge floors/caps.",
+      "oracle_labels": true,
+      "oracle_mode": "oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "remove_suspicious_ratio": 0.5,
+      "scenario_group": "camouflage",
+      "scenario_id": "camouflage_relation_oracle",
+      "severity_param": "p_cam_rel",
+      "severity_values": [
+        0.0,
+        0.15,
+        0.3
+      ]
+    },
+    {
+      "allow_self_loops": false,
+      "family": "noise",
+      "graph_view_mode": "heterograph_aware_generation",
+      "max_attempt_multiplier": 20,
+      "method": "add_random_edges",
+      "oracle_labels": false,
+      "oracle_mode": "non_oracle",
+      "reject_duplicates": true,
+      "reject_existing": true,
+      "relation_allocation": "proportional",
+      "relation_filter": [
+        "net_rsr",
+        "net_rtr",
+        "net_rur"
+      ],
+      "scenario_group": "noise",
+      "scenario_id": "noise_edges_uniform",
+      "severity_param": "edge_noise_rate",
+      "severity_values": [
+        0.0,
+        0.1,
+        0.2
+      ],
+      "undirected": false
+    }
+  ],
+  "seeds": {
+    "graph_seeds": [
+      0,
+      1
+    ],
+    "policy": "Cross both graph perturbation seeds with five optimization seeds inside every split; estimate allocation effects across the same three split seeds.",
+    "training_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  }
+}

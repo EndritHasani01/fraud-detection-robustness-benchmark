@@ -6,10 +6,10 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Sequence
 
 from .config import get_graph_seeds
-from .results import RunKey, make_run_key, normalize_protocol, row_run_key
+from .results import RunKey, make_run_key, normalize_protocol
 from .variants import filter_variants
 
 

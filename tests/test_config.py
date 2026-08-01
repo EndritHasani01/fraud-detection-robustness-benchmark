@@ -59,6 +59,48 @@ class ConfigSeedTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, r"seeds\.graph_seeds\[1\] must be an integer"):
             validate_config(cfg)
 
+    def test_validate_config_rejects_duplicate_seed_values(self) -> None:
+        cfg = _base_cfg()
+        cfg["seeds"]["training_seeds"] = [0, 0]
+
+        with self.assertRaisesRegex(ConfigError, r"seeds\.training_seeds must not contain duplicate values"):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_duplicate_or_invalid_splits(self) -> None:
+        cfg = _base_cfg()
+        cfg["data_splits"].append(
+            {"split_id": "s1", "split_seed": 0, "train_size": 0.4, "val_size": 0.2}
+        )
+        with self.assertRaisesRegex(ConfigError, r"must not repeat the same"):
+            validate_config(cfg)
+
+        cfg = _base_cfg()
+        cfg["data_splits"].append(
+            {"split_id": "s1", "split_seed": 0, "train_size": 0.6, "val_size": 0.2}
+        )
+        validate_config(cfg)
+
+        cfg = _base_cfg()
+        cfg["data_splits"][0]["val_size"] = 0.7
+        with self.assertRaisesRegex(ConfigError, r"train_size \+ .*val_size must be < 1"):
+            validate_config(cfg)
+
+    def test_validate_config_rejects_duplicate_identifiers_and_severities(self) -> None:
+        cfg = _base_cfg()
+        cfg["models"].append({"model_id": "mlp"})
+        with self.assertRaisesRegex(ConfigError, r"unique model_id"):
+            validate_config(cfg)
+
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["severity_values"] = [0.0, 0.1, 0.1]
+        with self.assertRaisesRegex(ConfigError, r"severity_values must not contain duplicates"):
+            validate_config(cfg)
+
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["severity_values"] = [0.1]
+        with self.assertRaisesRegex(ConfigError, r"severity_values must include 0.0"):
+            validate_config(cfg)
+
     def test_validate_config_warns_then_errors_when_both_seed_lists_missing(self) -> None:
         cfg = _base_cfg()
         cfg["seeds"] = {}
@@ -194,6 +236,31 @@ class ConfigV3SchemaTests(unittest.TestCase):
             ConfigError,
             r"cfg\['scenarios'\]\[0\]\.camouflage_edges_per_node must be an integer >= 1",
         ):
+            validate_config(cfg)
+
+    def test_validate_config_accepts_degree_relative_relation_camouflage(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0].update(
+            {
+                "camouflage_edge_degree_ratio": 0.25,
+                "camouflage_min_edges_per_node": 2,
+                "camouflage_max_edges_per_node": 64,
+            }
+        )
+        validate_config(cfg)
+
+        cfg["scenarios"][0]["camouflage_edges_per_node"] = 2
+        with self.assertRaisesRegex(ConfigError, r"must set only one"):
+            validate_config(cfg)
+
+    def test_validate_config_accepts_prospective_v4_scenario_controls(self) -> None:
+        cfg = _base_cfg()
+        cfg["scenarios"][0]["fixed_feature_partition_across_severity"] = True
+        cfg["scenarios"][0]["relation_allocation"] = "proportional"
+        validate_config(cfg)
+
+        cfg["scenarios"][0]["relation_allocation"] = "largest_first"
+        with self.assertRaisesRegex(ConfigError, r"relation_allocation must be 'uniform' or 'proportional'"):
             validate_config(cfg)
 
     def test_validate_config_rejects_invalid_audit_export_controls(self) -> None:

@@ -7,12 +7,25 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .config import get_training_seeds, scenario_oracle_labels
-from .results import PROTOCOL_TRAIN_ON_VARIANT, normalize_protocol
+from .results import (
+    PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+    PROTOCOL_TRAIN_ON_VARIANT,
+    normalize_protocol,
+)
 from .variants import filter_variants, read_variants_csv
 
 
 BOOTSTRAP_RESAMPLES = 1000
 BOOTSTRAP_SEED = 0
+CI_METHOD_NOT_REQUESTED = "not_requested"
+CI_METHOD_CROSSED_SEEDS = "crossed_training_graph_seed_bootstrap"
+CI_METHOD_PAIRED_DROP = "paired_drop_crossed_training_graph_seed_bootstrap"
+CI_METHOD_PAIRED_RETENTION = "paired_retention_crossed_training_graph_seed_bootstrap"
+CI_METHOD_PAIRED_CURVE = "paired_curve_crossed_training_graph_seed_bootstrap"
+CI_METHOD_PAIRED_PROTOCOL = "paired_protocol_crossed_training_graph_seed_bootstrap"
+CI_METHOD_GRAPH_SEED = "graph_seed_bootstrap"
+CI_METHOD_SPLIT = "split_bootstrap_over_split_means"
+UNSPECIFIED_SPLIT_REGIME_ID = "allocation_unspecified"
 
 
 @dataclass(frozen=True)
@@ -42,6 +55,17 @@ class MetricStats:
 
 
 @dataclass(frozen=True)
+class SeededMetricStats:
+    """Metric summary whose uncertainty respects the crossed seed design."""
+
+    stats: MetricStats
+    n_training_seeds: int
+    n_graph_seeds: int
+    n_seed_cells: int
+    ci_method: str
+
+
+@dataclass(frozen=True)
 class AuditMetricSpec:
     metric_id: str
     display_name: str
@@ -58,6 +82,14 @@ class CompletenessReport:
     error_count: int
     missing_keys: list[tuple[str, str, str, float, int, int, str, str]]
     error_keys: list[tuple[str, str, str, float, int, int, str, str]]
+
+
+@dataclass(frozen=True)
+class SplitAllocation:
+    split_regime_id: str
+    train_size: float | None
+    val_size: float | None
+    test_size: float | None
 
 
 def _safe_int(x: Any, default: int = 0) -> int:
@@ -78,6 +110,71 @@ def _parse_bool(x: Any) -> bool:
     if isinstance(x, bool):
         return bool(x)
     return str(x).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _format_allocation_rate(value: float) -> str:
+    return format(float(value), ".12g").replace("-", "m").replace(".", "p")
+
+
+def _split_allocations_from_config(cfg: Mapping[str, Any]) -> dict[str, SplitAllocation]:
+    """Map split IDs to comparable train/validation/test allocation regimes."""
+
+    out: dict[str, SplitAllocation] = {}
+    data_splits = cfg.get("data_splits", [])
+    if not isinstance(data_splits, list):
+        return out
+
+    for split_cfg in data_splits:
+        if not isinstance(split_cfg, Mapping):
+            continue
+        split_id = str(split_cfg.get("split_id", "")).strip()
+        if not split_id:
+            continue
+        try:
+            train_size = float(split_cfg["train_size"])
+            val_size = float(split_cfg["val_size"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (math.isfinite(train_size) and math.isfinite(val_size)):
+            continue
+        test_size = round(1.0 - train_size - val_size, 12)
+        explicit_regime_id = str(split_cfg.get("split_regime_id", "")).strip()
+        regime_id = explicit_regime_id or (
+            f"train_{_format_allocation_rate(train_size)}_"
+            f"val_{_format_allocation_rate(val_size)}_"
+            f"test_{_format_allocation_rate(test_size)}"
+        )
+        out[split_id] = SplitAllocation(
+            split_regime_id=regime_id,
+            train_size=train_size,
+            val_size=val_size,
+            test_size=test_size,
+        )
+    return out
+
+
+def _allocation_for_split(
+    split_id: Any,
+    split_allocations: Mapping[str, SplitAllocation],
+) -> SplitAllocation:
+    return split_allocations.get(
+        str(split_id),
+        SplitAllocation(
+            split_regime_id=UNSPECIFIED_SPLIT_REGIME_ID,
+            train_size=None,
+            val_size=None,
+            test_size=None,
+        ),
+    )
+
+
+def _allocation_fields(allocation: SplitAllocation) -> dict[str, Any]:
+    return {
+        "split_regime_id": allocation.split_regime_id,
+        "train_size": "" if allocation.train_size is None else allocation.train_size,
+        "val_size": "" if allocation.val_size is None else allocation.val_size,
+        "test_size": "" if allocation.test_size is None else allocation.test_size,
+    }
 
 
 def _read_results_csv(path: Path) -> list[ResultRow]:
@@ -248,119 +345,268 @@ def _aggregate_metric_stats(values: Sequence[float], *, ci: bool) -> MetricStats
     return MetricStats(mean=mean_v, std=std_v, n=int(len(vv)), ci_lower=ci_lower, ci_upper=ci_upper)
 
 
-def _bootstrap_difference_stats(
-    left_values: Sequence[float],
-    right_values: Sequence[float],
-    *,
-    ci: bool,
-    num_resamples: int = BOOTSTRAP_RESAMPLES,
-    seed: int = BOOTSTRAP_SEED,
-) -> MetricStats:
-    left = [float(v) for v in left_values if math.isfinite(float(v))]
-    right = [float(v) for v in right_values if math.isfinite(float(v))]
-    if not left or not right:
-        return MetricStats(mean=float("nan"), std=float("nan"), n=0, ci_lower=float("nan"), ci_upper=float("nan"))
+def _ci_method(enabled: bool, method: str) -> str:
+    return str(method) if bool(enabled) else CI_METHOD_NOT_REQUESTED
 
-    mean_v = float(sum(left) / len(left) - sum(right) / len(right))
-    if len(left) == 1 and len(right) == 1:
-        return MetricStats(mean=mean_v, std=0.0, n=1, ci_lower=mean_v, ci_upper=mean_v)
 
-    np = _require_numpy()
-    left_arr = np.asarray(left, dtype=np.float64)
-    right_arr = np.asarray(right, dtype=np.float64)
-    rng = np.random.default_rng(int(seed))
-    left_idx = rng.choice(left_arr.shape[0], size=(int(num_resamples), left_arr.shape[0]), replace=True)
-    right_idx = rng.choice(right_arr.shape[0], size=(int(num_resamples), right_arr.shape[0]), replace=True)
-    diffs = left_arr[left_idx].mean(axis=1) - right_arr[right_idx].mean(axis=1)
-    std_v = float(np.std(diffs, ddof=1)) if diffs.shape[0] > 1 else 0.0
-    if ci:
-        ci_lower, ci_upper = np.percentile(diffs, [2.5, 97.5])
-    else:
-        ci_lower = float("nan")
-        ci_upper = float("nan")
-    return MetricStats(
-        mean=mean_v,
-        std=std_v,
-        n=int(min(len(left), len(right))),
-        ci_lower=float(ci_lower),
-        ci_upper=float(ci_upper),
+def _empty_seeded_stats(*, ci: bool, method: str) -> SeededMetricStats:
+    return SeededMetricStats(
+        stats=MetricStats(
+            mean=float("nan"),
+            std=float("nan"),
+            n=0,
+            ci_lower=float("nan"),
+            ci_upper=float("nan"),
+        ),
+        n_training_seeds=0,
+        n_graph_seeds=0,
+        n_seed_cells=0,
+        ci_method=_ci_method(ci, method),
     )
 
 
-def _bootstrap_robustness_stats(
-    x_values: Sequence[float],
-    values_by_severity: Sequence[Sequence[float]],
+def _seed_cell_values(rows: Iterable[ResultRow], metric_key: str) -> dict[tuple[int, int], float]:
+    """Collapse duplicate ledger rows into one value per crossed seed cell."""
+
+    grouped: dict[tuple[int, int], list[float]] = {}
+    for row in rows:
+        value = float(getattr(row, metric_key))
+        if not math.isfinite(value):
+            continue
+        grouped.setdefault((int(row.training_seed), int(row.graph_seed)), []).append(value)
+    return {
+        key: float(sum(values) / len(values))
+        for key, values in grouped.items()
+        if values
+    }
+
+
+def _values_by_training_seed(rows: Iterable[ResultRow], metric_key: str) -> dict[int, float]:
+    """Aggregate graph realizations within each training seed."""
+
+    grouped: dict[int, list[float]] = {}
+    for (_training_seed, _graph_seed), value in _seed_cell_values(rows, metric_key).items():
+        grouped.setdefault(int(_training_seed), []).append(float(value))
+    return {
+        training_seed: float(sum(values) / len(values))
+        for training_seed, values in grouped.items()
+        if values
+    }
+
+
+def _crossed_seed_bootstrap_means(
+    cell_values: Mapping[tuple[int, int], float],
     *,
-    ci: bool,
     num_resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
-) -> tuple[MetricStats, MetricStats]:
+) -> list[float]:
+    """Bootstrap both crossed random axes, never the flattened result rows."""
+
+    if not cell_values:
+        return []
     np = _require_numpy()
-
-    x = np.asarray([float(x) for x in x_values], dtype=np.float64)
-    if x.shape[0] < 2:
-        empty = MetricStats(mean=float("nan"), std=float("nan"), n=0, ci_lower=float("nan"), ci_upper=float("nan"))
-        return empty, empty
-
-    x_range = float(x.max() - x.min())
-    if x_range <= 0.0:
-        empty = MetricStats(mean=float("nan"), std=float("nan"), n=0, ci_lower=float("nan"), ci_upper=float("nan"))
-        return empty, empty
-
-    series: list[list[float]] = []
-    for values in values_by_severity:
-        vv = [float(v) for v in values if math.isfinite(float(v))]
-        if not vv:
-            empty = MetricStats(mean=float("nan"), std=float("nan"), n=0, ci_lower=float("nan"), ci_upper=float("nan"))
-            return empty, empty
-        series.append(vv)
-
-    mean_curve = np.asarray([sum(vv) / len(vv) for vv in series], dtype=np.float64)
-    auc_mean = float(np.sum((x[1:] - x[:-1]) * (mean_curve[1:] + mean_curve[:-1]) * 0.5))
-    avg_mean = float(auc_mean / x_range)
-
-    if all(len(vv) == 1 for vv in series):
-        auc_stats = MetricStats(mean=auc_mean, std=0.0, n=1, ci_lower=auc_mean, ci_upper=auc_mean)
-        avg_stats = MetricStats(mean=avg_mean, std=0.0, n=1, ci_lower=avg_mean, ci_upper=avg_mean)
-        return auc_stats, avg_stats
-
+    training_seeds = sorted({int(key[0]) for key in cell_values})
+    graph_seeds = sorted({int(key[1]) for key in cell_values})
     rng = np.random.default_rng(int(seed))
-    auc_samples = []
-    avg_samples = []
+    samples: list[float] = []
     for _ in range(int(num_resamples)):
-        sampled_curve = []
-        for vv in series:
-            arr = np.asarray(vv, dtype=np.float64)
-            idx = rng.choice(arr.shape[0], size=arr.shape[0], replace=True)
-            sampled_curve.append(float(arr[idx].mean()))
-        y = np.asarray(sampled_curve, dtype=np.float64)
-        auc = float(np.sum((x[1:] - x[:-1]) * (y[1:] + y[:-1]) * 0.5))
-        auc_samples.append(auc)
-        avg_samples.append(float(auc / x_range))
+        sampled_training = rng.choice(training_seeds, size=len(training_seeds), replace=True)
+        sampled_graph = rng.choice(graph_seeds, size=len(graph_seeds), replace=True)
+        values = [
+            float(cell_values[(int(training_seed), int(graph_seed))])
+            for training_seed in sampled_training
+            for graph_seed in sampled_graph
+            if (int(training_seed), int(graph_seed)) in cell_values
+        ]
+        if values:
+            samples.append(float(sum(values) / len(values)))
+    return samples
 
-    auc_std = float(np.std(np.asarray(auc_samples, dtype=np.float64), ddof=1)) if len(auc_samples) > 1 else 0.0
-    avg_std = float(np.std(np.asarray(avg_samples, dtype=np.float64), ddof=1)) if len(avg_samples) > 1 else 0.0
+
+def _seeded_stats_from_cells(
+    cell_values: Mapping[tuple[int, int], float],
+    *,
+    ci: bool,
+    method: str = CI_METHOD_CROSSED_SEEDS,
+) -> SeededMetricStats:
+    finite_cells = {
+        (int(training_seed), int(graph_seed)): float(value)
+        for (training_seed, graph_seed), value in cell_values.items()
+        if math.isfinite(float(value))
+    }
+    if not finite_cells:
+        return _empty_seeded_stats(ci=ci, method=method)
+
+    raw_stats = _aggregate_metric_stats(list(finite_cells.values()), ci=False)
+    samples: list[float] = []
     if ci:
-        auc_lo, auc_hi = np.percentile(np.asarray(auc_samples, dtype=np.float64), [2.5, 97.5])
-        avg_lo, avg_hi = np.percentile(np.asarray(avg_samples, dtype=np.float64), [2.5, 97.5])
-    else:
-        auc_lo = auc_hi = avg_lo = avg_hi = float("nan")
+        samples = _crossed_seed_bootstrap_means(finite_cells)
 
+    if ci and samples:
+        np = _require_numpy()
+        ci_lower, ci_upper = np.percentile(np.asarray(samples, dtype=np.float64), [2.5, 97.5])
+    else:
+        ci_lower = ci_upper = float("nan")
+
+    return SeededMetricStats(
+        stats=MetricStats(
+            mean=raw_stats.mean,
+            std=raw_stats.std,
+            n=raw_stats.n,
+            ci_lower=float(ci_lower),
+            ci_upper=float(ci_upper),
+        ),
+        n_training_seeds=len({key[0] for key in finite_cells}),
+        n_graph_seeds=len({key[1] for key in finite_cells}),
+        n_seed_cells=len(finite_cells),
+        ci_method=_ci_method(ci, method),
+    )
+
+
+def _aggregate_seeded_metric_stats(
+    rows: Iterable[ResultRow],
+    metric_key: str,
+    *,
+    ci: bool,
+) -> SeededMetricStats:
+    return _seeded_stats_from_cells(_seed_cell_values(rows, metric_key), ci=ci)
+
+
+def _paired_clean_stress_stats(
+    clean_rows: Iterable[ResultRow],
+    stressed_rows: Iterable[ResultRow],
+    metric_key: str,
+    *,
+    ci: bool,
+) -> SeededMetricStats:
+    """Compute clean-minus-stress after pairing by training seed.
+
+    The clean graph has one graph identifier while stressed runs have one or
+    more graph seeds. Replicating each clean value only within its matching
+    training seed preserves both the training and graph clusters and makes an
+    exact per-seed invariant exactly zero under every bootstrap resample.
+    """
+
+    clean_by_training = _values_by_training_seed(clean_rows, metric_key)
+    stressed_cells = _seed_cell_values(stressed_rows, metric_key)
+    paired_cells = {
+        (training_seed, graph_seed): float(clean_by_training[training_seed] - stressed_value)
+        for (training_seed, graph_seed), stressed_value in stressed_cells.items()
+        if training_seed in clean_by_training
+    }
+    return _seeded_stats_from_cells(
+        paired_cells,
+        ci=ci,
+        method=CI_METHOD_PAIRED_DROP,
+    )
+
+
+def _paired_retention_stats(
+    clean_rows: Iterable[ResultRow],
+    stressed_rows: Iterable[ResultRow],
+    metric_key: str,
+    *,
+    ci: bool,
+) -> SeededMetricStats:
+    """Compute stressed/clean retention within matching training and graph cells."""
+
+    clean_by_training = _values_by_training_seed(clean_rows, metric_key)
+    stressed_cells = _seed_cell_values(stressed_rows, metric_key)
+    retention_cells = {
+        (training_seed, graph_seed): float(stressed_value / clean_by_training[training_seed])
+        for (training_seed, graph_seed), stressed_value in stressed_cells.items()
+        if training_seed in clean_by_training
+        and math.isfinite(clean_by_training[training_seed])
+        and abs(clean_by_training[training_seed]) > 1e-15
+    }
+    return _seeded_stats_from_cells(
+        retention_cells,
+        ci=ci,
+        method=CI_METHOD_PAIRED_RETENTION,
+    )
+
+
+def _paired_same_cell_contrast_stats(
+    left_rows: Iterable[ResultRow],
+    right_rows: Iterable[ResultRow],
+    metric_key: str,
+    *,
+    ci: bool,
+) -> tuple[SeededMetricStats, SeededMetricStats, SeededMetricStats]:
+    left_cells = _seed_cell_values(left_rows, metric_key)
+    right_cells = _seed_cell_values(right_rows, metric_key)
+    paired_keys = sorted(set(left_cells) & set(right_cells))
+    paired_left = {key: left_cells[key] for key in paired_keys}
+    paired_right = {key: right_cells[key] for key in paired_keys}
+    contrast = {key: float(left_cells[key] - right_cells[key]) for key in paired_keys}
     return (
-        MetricStats(
-            mean=auc_mean,
-            std=auc_std,
-            n=int(min(len(vv) for vv in series)),
-            ci_lower=float(auc_lo),
-            ci_upper=float(auc_hi),
+        _seeded_stats_from_cells(paired_left, ci=ci),
+        _seeded_stats_from_cells(paired_right, ci=ci),
+        _seeded_stats_from_cells(
+            contrast,
+            ci=ci,
+            method=CI_METHOD_PAIRED_PROTOCOL,
         ),
-        MetricStats(
-            mean=avg_mean,
-            std=avg_std,
-            n=int(min(len(vv) for vv in series)),
-            ci_lower=float(avg_lo),
-            ci_upper=float(avg_hi),
+    )
+
+
+def _paired_curve_robustness_stats(
+    x_values: Sequence[float],
+    rows_by_severity: Sequence[Sequence[ResultRow]],
+    metric_key: str,
+    *,
+    ci: bool,
+) -> tuple[SeededMetricStats, SeededMetricStats, int]:
+    """Summarize curve AUC from complete, seed-paired trajectories."""
+
+    if len(x_values) < 2 or len(x_values) != len(rows_by_severity):
+        empty = _empty_seeded_stats(ci=ci, method=CI_METHOD_PAIRED_CURVE)
+        return empty, empty, 0
+    x = [float(value) for value in x_values]
+    x_range = max(x) - min(x)
+    if x_range <= 0.0:
+        empty = _empty_seeded_stats(ci=ci, method=CI_METHOD_PAIRED_CURVE)
+        return empty, empty, 0
+
+    clean_by_training = _values_by_training_seed(rows_by_severity[0], metric_key)
+    stressed_by_severity = [_seed_cell_values(rows, metric_key) for rows in rows_by_severity[1:]]
+    if not clean_by_training or any(not cells for cells in stressed_by_severity):
+        empty = _empty_seeded_stats(ci=ci, method=CI_METHOD_PAIRED_CURVE)
+        return empty, empty, 0
+
+    complete_keys = set(stressed_by_severity[0])
+    for cells in stressed_by_severity[1:]:
+        complete_keys &= set(cells)
+    complete_keys = {key for key in complete_keys if key[0] in clean_by_training}
+
+    auc_cells: dict[tuple[int, int], float] = {}
+    avg_cells: dict[tuple[int, int], float] = {}
+    for key in sorted(complete_keys):
+        curve = [clean_by_training[key[0]]] + [cells[key] for cells in stressed_by_severity]
+        auc = float(
+            sum(
+                (x[idx + 1] - x[idx]) * (curve[idx + 1] + curve[idx]) * 0.5
+                for idx in range(len(x) - 1)
+            )
+        )
+        auc_cells[key] = auc
+        avg_cells[key] = float(auc / x_range)
+
+    min_runs = min(
+        [len(clean_by_training)] + [len(cells) for cells in stressed_by_severity]
+    )
+    return (
+        _seeded_stats_from_cells(
+            auc_cells,
+            ci=ci,
+            method=CI_METHOD_PAIRED_CURVE,
         ),
+        _seeded_stats_from_cells(
+            avg_cells,
+            ci=ci,
+            method=CI_METHOD_PAIRED_CURVE,
+        ),
+        int(min_runs),
     )
 
 
@@ -372,6 +618,14 @@ def _scenario_oracle_labels(scenario_meta: dict[str, dict[str, Any]], scenario_i
 def _scenario_display_name(scenario_meta: dict[str, dict[str, Any]], scenario_id: str) -> str:
     meta = scenario_meta.get(str(scenario_id), {})
     return str(meta.get("display_name", str(scenario_id)))
+
+
+def _claim_scope(*, oracle_labels: bool, protocol: str) -> str:
+    if not bool(oracle_labels):
+        return "non_oracle_controlled_stress"
+    if normalize_protocol(protocol) == PROTOCOL_TRAIN_CLEAN_EVAL_ALL:
+        return "oracle_shift_sensitivity_diagnostic"
+    return "oracle_privileged_training_diagnostic"
 
 
 def _variant_join_key(
@@ -755,22 +1009,33 @@ def _build_audit_summary_rows(
                 "audit_metric_label": metric_label,
                 "audit_metric_unit": metric_unit,
                 "oracle_labels": bool(oracle_labels),
+                "claim_scope": _claim_scope(oracle_labels=bool(oracle_labels), protocol=protocol),
+                "operational_ranking_eligible": not bool(oracle_labels),
                 "graph_view_mode": graph_view_mode,
                 "mean": stats.mean,
                 "std": stats.std,
                 "ci_lower": stats.ci_lower,
                 "ci_upper": stats.ci_upper,
                 "n_graphs": stats.n,
+                "n_graph_seeds": stats.n,
+                "ci_method": _ci_method(ci, CI_METHOD_GRAPH_SEED),
                 "source": source,
             }
         )
     return out
 
 
-def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, float, str, str, str, str, bool, str, str], list[dict[str, Any]]] = {}
+def _build_cross_split_audit_rows(
+    audit_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, float, str, str, str, str, bool, str, str], list[dict[str, Any]]] = {}
     for row in audit_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             float(row.get("severity", 0.0) or 0.0),
@@ -787,6 +1052,7 @@ def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: b
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
         (
+            split_regime_id,
             dataset_id,
             scenario_id,
             severity,
@@ -798,10 +1064,17 @@ def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: b
             graph_view_mode,
             source,
         ) = key
+        allocation = next(
+            _allocation_for_split(row.get("split_id", ""), split_allocations)
+            for row in groups[key]
+        )
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split audit allocation regime mismatch")
         split_means = [_safe_float(row.get("mean", "")) for row in groups[key]]
         stats = _aggregate_metric_stats(split_means, ci=ci)
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "severity": float(severity),
@@ -810,12 +1083,19 @@ def _build_cross_split_audit_rows(audit_rows: Sequence[dict[str, Any]], *, ci: b
                 "audit_metric_label": metric_label,
                 "audit_metric_unit": metric_unit,
                 "oracle_labels": bool(oracle_labels),
+                "claim_scope": _claim_scope(oracle_labels=bool(oracle_labels), protocol=protocol),
+                "operational_ranking_eligible": not bool(oracle_labels),
                 "graph_view_mode": graph_view_mode,
                 "mean": stats.mean,
                 "std": stats.std,
                 "ci_lower": stats.ci_lower,
                 "ci_upper": stats.ci_upper,
                 "n_splits": stats.n,
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", row.get("n_graphs", 0))) for row in groups[key]),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
                 "source": source,
             }
         )
@@ -980,8 +1260,219 @@ def _print_completeness_report(report: CompletenessReport) -> None:
         print(f"[plots] Error runs: {sample}{suffix}")
 
 
-def _metric_values(rows: Iterable[ResultRow], metric_key: str) -> list[float]:
-    return [float(getattr(row, metric_key)) for row in rows]
+def _result_rows_for_point(
+    rows: Sequence[ResultRow],
+    *,
+    model_id: str,
+    protocol: str,
+    scenario_id: str,
+    severity: float,
+) -> list[ResultRow]:
+    return [
+        row
+        for row in rows
+        if row.model_id == model_id
+        and row.protocol == protocol
+        and row.scenario_id == scenario_id
+        and float(row.severity) == float(severity)
+    ]
+
+
+def _build_protocol_contrast_rows(
+    rows: Sequence[ResultRow],
+    *,
+    severity_grid: Mapping[str, Sequence[float]],
+    scenario_meta: Mapping[str, Mapping[str, Any]],
+    model_ids: Sequence[str],
+    metric_keys: Sequence[str],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    """Pair train-on-variant minus clean-train runs on both seed axes."""
+
+    grouped: dict[tuple[str, str], list[ResultRow]] = {}
+    for row in rows:
+        grouped.setdefault((row.dataset_id, row.split_id), []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for (dataset_id, split_id), group_rows in sorted(grouped.items()):
+        protocols = {row.protocol for row in group_rows}
+        if not {PROTOCOL_TRAIN_ON_VARIANT, PROTOCOL_TRAIN_CLEAN_EVAL_ALL}.issubset(protocols):
+            continue
+        for scenario_id, configured_severities in severity_grid.items():
+            oracle_labels = bool(scenario_meta.get(scenario_id, {}).get("oracle_labels", False))
+            severities = [0.0] + sorted(
+                {float(value) for value in configured_severities if float(value) != 0.0}
+            )
+            for severity in severities:
+                point_scenario = "clean" if float(severity) == 0.0 else str(scenario_id)
+                source = "clean" if float(severity) == 0.0 else "scenario"
+                for model_id in model_ids:
+                    left_rows = _result_rows_for_point(
+                        group_rows,
+                        model_id=model_id,
+                        protocol=PROTOCOL_TRAIN_ON_VARIANT,
+                        scenario_id=point_scenario,
+                        severity=severity,
+                    )
+                    right_rows = _result_rows_for_point(
+                        group_rows,
+                        model_id=model_id,
+                        protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                        scenario_id=point_scenario,
+                        severity=severity,
+                    )
+                    for metric_key in metric_keys:
+                        left_stats, right_stats, contrast_stats = _paired_same_cell_contrast_stats(
+                            left_rows,
+                            right_rows,
+                            metric_key,
+                            ci=ci,
+                        )
+                        if contrast_stats.stats.n <= 0:
+                            continue
+                        out.append(
+                            {
+                                "dataset_id": dataset_id,
+                                "split_id": split_id,
+                                "scenario_id": scenario_id,
+                                "severity": float(severity),
+                                "model_id": model_id,
+                                "metric": metric_key,
+                                "oracle_labels": oracle_labels,
+                                "claim_scope": (
+                                    "oracle_protocol_comparison_diagnostic"
+                                    if oracle_labels
+                                    else "non_oracle_controlled_stress"
+                                ),
+                                "left_claim_scope": _claim_scope(
+                                    oracle_labels=oracle_labels,
+                                    protocol=PROTOCOL_TRAIN_ON_VARIANT,
+                                ),
+                                "right_claim_scope": _claim_scope(
+                                    oracle_labels=oracle_labels,
+                                    protocol=PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                                ),
+                                "operational_ranking_eligible": not oracle_labels,
+                                "left_protocol": PROTOCOL_TRAIN_ON_VARIANT,
+                                "right_protocol": PROTOCOL_TRAIN_CLEAN_EVAL_ALL,
+                                "contrast_definition": (
+                                    f"{PROTOCOL_TRAIN_ON_VARIANT} - {PROTOCOL_TRAIN_CLEAN_EVAL_ALL}"
+                                ),
+                                "left_mean": left_stats.stats.mean,
+                                "right_mean": right_stats.stats.mean,
+                                "contrast_mean": contrast_stats.stats.mean,
+                                "contrast_std": contrast_stats.stats.std,
+                                "contrast_ci_lower": contrast_stats.stats.ci_lower,
+                                "contrast_ci_upper": contrast_stats.stats.ci_upper,
+                                "n_pairs": contrast_stats.stats.n,
+                                "n_training_seeds": contrast_stats.n_training_seeds,
+                                "n_graph_seeds": contrast_stats.n_graph_seeds,
+                                "ci_method": contrast_stats.ci_method,
+                                "source": source,
+                            }
+                        )
+    return out
+
+
+def _build_worst_case_rows(
+    summary_rows: Sequence[dict[str, Any]],
+    result_rows: Sequence[ResultRow],
+    *,
+    ci: bool,
+) -> list[dict[str, Any]]:
+    """Select the lowest observed non-clean point per model/protocol/metric."""
+
+    candidates: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = {}
+    for row in summary_rows:
+        mean_value = _safe_float(row.get("mean", ""))
+        if str(row.get("source", "")) != "scenario" or not math.isfinite(mean_value):
+            continue
+        key = (
+            str(row.get("dataset_id", "")),
+            str(row.get("split_id", "")),
+            str(row.get("model_id", "")),
+            str(row.get("protocol", "")),
+            str(row.get("metric", "")),
+        )
+        candidates.setdefault(key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for key in sorted(candidates):
+        dataset_id, split_id, model_id, protocol, metric_key = key
+        selected = min(
+            candidates[key],
+            key=lambda row: (
+                _safe_float(row.get("mean", "")),
+                str(row.get("scenario_id", "")),
+                float(row.get("severity", 0.0) or 0.0),
+            ),
+        )
+        scenario_id = str(selected.get("scenario_id", ""))
+        severity = float(selected.get("severity", 0.0) or 0.0)
+        group_rows = [
+            row
+            for row in result_rows
+            if row.dataset_id == dataset_id
+            and row.split_id == split_id
+            and row.model_id == model_id
+            and row.protocol == protocol
+        ]
+        clean_rows = _result_rows_for_point(
+            group_rows,
+            model_id=model_id,
+            protocol=protocol,
+            scenario_id="clean",
+            severity=0.0,
+        )
+        stressed_rows = _result_rows_for_point(
+            group_rows,
+            model_id=model_id,
+            protocol=protocol,
+            scenario_id=scenario_id,
+            severity=severity,
+        )
+        clean_stats = _aggregate_seeded_metric_stats(clean_rows, metric_key, ci=ci)
+        drop_stats = _paired_clean_stress_stats(clean_rows, stressed_rows, metric_key, ci=ci)
+        retention_stats = _paired_retention_stats(clean_rows, stressed_rows, metric_key, ci=ci)
+        out.append(
+            {
+                "dataset_id": dataset_id,
+                "split_id": split_id,
+                "model_id": model_id,
+                "protocol": protocol,
+                "metric": metric_key,
+                "worst_scenario_id": scenario_id,
+                "worst_severity": severity,
+                "oracle_labels": bool(selected.get("oracle_labels", False)),
+                "claim_scope": _claim_scope(
+                    oracle_labels=bool(selected.get("oracle_labels", False)),
+                    protocol=protocol,
+                ),
+                "operational_ranking_eligible": not bool(selected.get("oracle_labels", False)),
+                "worst_mean": _safe_float(selected.get("mean", "")),
+                "worst_std": _safe_float(selected.get("std", "")),
+                "worst_ci_lower": _safe_float(selected.get("ci_lower", "")),
+                "worst_ci_upper": _safe_float(selected.get("ci_upper", "")),
+                "clean_mean": clean_stats.stats.mean,
+                "drop_from_clean_mean": drop_stats.stats.mean,
+                "drop_from_clean_std": drop_stats.stats.std,
+                "drop_from_clean_ci_lower": drop_stats.stats.ci_lower,
+                "drop_from_clean_ci_upper": drop_stats.stats.ci_upper,
+                "retention_fraction_mean": retention_stats.stats.mean,
+                "retention_fraction_std": retention_stats.stats.std,
+                "retention_fraction_ci_lower": retention_stats.stats.ci_lower,
+                "retention_fraction_ci_upper": retention_stats.stats.ci_upper,
+                "n_runs": _safe_int(selected.get("n_runs", 0)),
+                "n_training_seeds": _safe_int(selected.get("n_training_seeds", 0)),
+                "n_graph_seeds": _safe_int(selected.get("n_graph_seeds", 0)),
+                "n_paired_seed_cells": drop_stats.n_seed_cells,
+                "ci_method": str(selected.get("ci_method", CI_METHOD_NOT_REQUESTED)),
+                "drop_ci_method": drop_stats.ci_method,
+                "retention_ci_method": retention_stats.ci_method,
+                "selection_method": "minimum_configured_nonzero_point_mean",
+            }
+        )
+    return out
 
 
 def _yerr_from_stats(stats_by_point: Sequence[MetricStats], *, use_ci: bool) -> Any:
@@ -1010,10 +1501,17 @@ def _yerr_from_stats(stats_by_point: Sequence[MetricStats], *, use_ci: bool) -> 
     return out
 
 
-def _build_cross_split_summary_rows(summary_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, float, str, str, str, bool, str], list[dict[str, Any]]] = {}
+def _build_cross_split_summary_rows(
+    summary_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, float, str, str, str, bool, str], list[dict[str, Any]]] = {}
     for row in summary_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             float(row.get("severity", 0.0) or 0.0),
@@ -1027,12 +1525,16 @@ def _build_cross_split_summary_rows(summary_rows: Sequence[dict[str, Any]], *, c
 
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
-        dataset_id, scenario_id, severity, model_id, protocol, metric, oracle_labels, source = key
+        split_regime_id, dataset_id, scenario_id, severity, model_id, protocol, metric, oracle_labels, source = key
         rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split summary allocation regime mismatch")
         split_means = [_safe_float(row.get("mean", "")) for row in rows]
         stats = _aggregate_metric_stats(split_means, ci=ci)
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "severity": float(severity),
@@ -1040,21 +1542,39 @@ def _build_cross_split_summary_rows(summary_rows: Sequence[dict[str, Any]], *, c
                 "protocol": protocol,
                 "metric": metric,
                 "oracle_labels": bool(oracle_labels),
+                "claim_scope": _claim_scope(oracle_labels=bool(oracle_labels), protocol=protocol),
+                "operational_ranking_eligible": not bool(oracle_labels),
                 "mean": stats.mean,
                 "std": stats.std,
                 "ci_lower": stats.ci_lower,
                 "ci_upper": stats.ci_upper,
                 "n_splits": stats.n,
+                "min_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_training_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
                 "source": source,
             }
         )
     return out
 
 
-def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, str, str, str, float, bool], list[dict[str, Any]]] = {}
+def _build_cross_split_drop_rows(
+    drop_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, str, str, str, float, bool], list[dict[str, Any]]] = {}
     for row in drop_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             str(row.get("model_id", "")),
@@ -1067,13 +1587,17 @@ def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: boo
 
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
-        dataset_id, scenario_id, model_id, protocol, metric, max_severity, oracle_labels = key
+        split_regime_id, dataset_id, scenario_id, model_id, protocol, metric, max_severity, oracle_labels = key
         rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split drop allocation regime mismatch")
         clean_stats = _aggregate_metric_stats([_safe_float(row.get("clean_mean", "")) for row in rows], ci=ci)
         stressed_stats = _aggregate_metric_stats([_safe_float(row.get("max_severity_mean", "")) for row in rows], ci=ci)
         drop_stats = _aggregate_metric_stats([_safe_float(row.get("drop_mean", "")) for row in rows], ci=ci)
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "model_id": model_id,
@@ -1081,6 +1605,8 @@ def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: boo
                 "metric": metric,
                 "max_severity": float(max_severity),
                 "oracle_labels": bool(oracle_labels),
+                "claim_scope": _claim_scope(oracle_labels=bool(oracle_labels), protocol=protocol),
+                "operational_ranking_eligible": not bool(oracle_labels),
                 "clean_mean": clean_stats.mean,
                 "clean_std": clean_stats.std,
                 "clean_ci_lower": clean_stats.ci_lower,
@@ -1094,15 +1620,31 @@ def _build_cross_split_drop_rows(drop_rows: Sequence[dict[str, Any]], *, ci: boo
                 "drop_ci_lower": drop_stats.ci_lower,
                 "drop_ci_upper": drop_stats.ci_upper,
                 "n_splits": drop_stats.n,
+                "min_paired_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_paired_training_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
             }
         )
     return out
 
 
-def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci: bool) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, str, str, str, bool], list[dict[str, Any]]] = {}
+def _build_cross_split_robust_rows(
+    robust_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, str, str, str, str, str, bool], list[dict[str, Any]]] = {}
     for row in robust_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
         key = (
+            allocation.split_regime_id,
             str(row.get("dataset_id", "")),
             str(row.get("scenario_id", "")),
             str(row.get("model_id", "")),
@@ -1114,8 +1656,11 @@ def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci:
 
     out: list[dict[str, Any]] = []
     for key in sorted(groups):
-        dataset_id, scenario_id, model_id, protocol, metric, oracle_labels = key
+        split_regime_id, dataset_id, scenario_id, model_id, protocol, metric, oracle_labels = key
         rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split robustness allocation regime mismatch")
         auc_stats = _aggregate_metric_stats([_safe_float(row.get("robustness_auc_mean", "")) for row in rows], ci=ci)
         avg_stats = _aggregate_metric_stats(
             [_safe_float(row.get("robustness_avg_metric_mean", "")) for row in rows],
@@ -1123,12 +1668,15 @@ def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci:
         )
         out.append(
             {
+                **_allocation_fields(allocation),
                 "dataset_id": dataset_id,
                 "scenario_id": scenario_id,
                 "model_id": model_id,
                 "protocol": protocol,
                 "metric": metric,
                 "oracle_labels": bool(oracle_labels),
+                "claim_scope": _claim_scope(oracle_labels=bool(oracle_labels), protocol=protocol),
+                "operational_ranking_eligible": not bool(oracle_labels),
                 "robustness_auc_mean": auc_stats.mean,
                 "robustness_auc_std": auc_stats.std,
                 "robustness_auc_ci_lower": auc_stats.ci_lower,
@@ -1138,6 +1686,263 @@ def _build_cross_split_robust_rows(robust_rows: Sequence[dict[str, Any]], *, ci:
                 "robustness_avg_metric_ci_lower": avg_stats.ci_lower,
                 "robustness_avg_metric_ci_upper": avg_stats.ci_upper,
                 "n_splits": avg_stats.n,
+                "min_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_training_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+            }
+        )
+    return out
+
+
+def _build_cross_split_protocol_contrast_rows(
+    contrast_rows: Sequence[dict[str, Any]],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in contrast_rows:
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        key = (
+            allocation.split_regime_id,
+            str(row.get("dataset_id", "")),
+            str(row.get("scenario_id", "")),
+            float(row.get("severity", 0.0) or 0.0),
+            str(row.get("model_id", "")),
+            str(row.get("metric", "")),
+            bool(row.get("oracle_labels", False)),
+            str(row.get("claim_scope", "")),
+            str(row.get("left_claim_scope", "")),
+            str(row.get("right_claim_scope", "")),
+            bool(row.get("operational_ranking_eligible", False)),
+            str(row.get("left_protocol", "")),
+            str(row.get("right_protocol", "")),
+            str(row.get("contrast_definition", "")),
+            str(row.get("source", "")),
+        )
+        groups.setdefault(key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for key in sorted(groups):
+        (
+            split_regime_id,
+            dataset_id,
+            scenario_id,
+            severity,
+            model_id,
+            metric,
+            oracle_labels,
+            claim_scope,
+            left_claim_scope,
+            right_claim_scope,
+            operational_ranking_eligible,
+            left_protocol,
+            right_protocol,
+            contrast_definition,
+            source,
+        ) = key
+        rows = groups[key]
+        allocation = _allocation_for_split(rows[0].get("split_id", ""), split_allocations)
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split protocol contrast allocation regime mismatch")
+        left_stats = _aggregate_metric_stats(
+            [_safe_float(row.get("left_mean", "")) for row in rows],
+            ci=ci,
+        )
+        right_stats = _aggregate_metric_stats(
+            [_safe_float(row.get("right_mean", "")) for row in rows],
+            ci=ci,
+        )
+        contrast_stats = _aggregate_metric_stats(
+            [_safe_float(row.get("contrast_mean", "")) for row in rows],
+            ci=ci,
+        )
+        out.append(
+            {
+                **_allocation_fields(allocation),
+                "dataset_id": dataset_id,
+                "scenario_id": scenario_id,
+                "severity": float(severity),
+                "model_id": model_id,
+                "metric": metric,
+                "oracle_labels": bool(oracle_labels),
+                "claim_scope": claim_scope,
+                "left_claim_scope": left_claim_scope,
+                "right_claim_scope": right_claim_scope,
+                "operational_ranking_eligible": bool(operational_ranking_eligible),
+                "left_protocol": left_protocol,
+                "right_protocol": right_protocol,
+                "contrast_definition": contrast_definition,
+                "left_mean": left_stats.mean,
+                "right_mean": right_stats.mean,
+                "contrast_mean": contrast_stats.mean,
+                "contrast_std": contrast_stats.std,
+                "contrast_ci_lower": contrast_stats.ci_lower,
+                "contrast_ci_upper": contrast_stats.ci_upper,
+                "n_splits": contrast_stats.n,
+                "min_pairs_per_split": min(
+                    (_safe_int(row.get("n_pairs", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_training_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "source": source,
+            }
+        )
+    return out
+
+
+def _build_cross_split_worst_case_rows(
+    summary_rows: Sequence[dict[str, Any]],
+    result_rows: Sequence[ResultRow],
+    *,
+    split_allocations: Mapping[str, SplitAllocation],
+    ci: bool,
+) -> list[dict[str, Any]]:
+    """Select the lowest regime-level point, then aggregate paired split means."""
+
+    candidates: dict[tuple[str, str, str, str, str], dict[tuple[str, float, bool], list[dict[str, Any]]]] = {}
+    for row in summary_rows:
+        mean_value = _safe_float(row.get("mean", ""))
+        if str(row.get("source", "")) != "scenario" or not math.isfinite(mean_value):
+            continue
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        group_key = (
+            allocation.split_regime_id,
+            str(row.get("dataset_id", "")),
+            str(row.get("model_id", "")),
+            str(row.get("protocol", "")),
+            str(row.get("metric", "")),
+        )
+        point_key = (
+            str(row.get("scenario_id", "")),
+            float(row.get("severity", 0.0) or 0.0),
+            bool(row.get("oracle_labels", False)),
+        )
+        candidates.setdefault(group_key, {}).setdefault(point_key, []).append(row)
+
+    out: list[dict[str, Any]] = []
+    for group_key in sorted(candidates):
+        split_regime_id, dataset_id, model_id, protocol, metric_key = group_key
+        point_groups = candidates[group_key]
+        selected_key, selected_rows = min(
+            point_groups.items(),
+            key=lambda item: (
+                _aggregate_metric_stats(
+                    [_safe_float(row.get("mean", "")) for row in item[1]],
+                    ci=False,
+                ).mean,
+                item[0][0],
+                item[0][1],
+            ),
+        )
+        scenario_id, severity, oracle_labels = selected_key
+        allocation = _allocation_for_split(
+            selected_rows[0].get("split_id", ""),
+            split_allocations,
+        )
+        if allocation.split_regime_id != split_regime_id:
+            raise RuntimeError("Cross-split worst-case allocation regime mismatch")
+
+        worst_split_means: list[float] = []
+        clean_split_means: list[float] = []
+        drop_split_means: list[float] = []
+        retention_split_means: list[float] = []
+        for summary_row in selected_rows:
+            split_id = str(summary_row.get("split_id", ""))
+            split_results = [
+                row
+                for row in result_rows
+                if row.dataset_id == dataset_id
+                and row.split_id == split_id
+                and row.model_id == model_id
+                and row.protocol == protocol
+            ]
+            clean_rows = _result_rows_for_point(
+                split_results,
+                model_id=model_id,
+                protocol=protocol,
+                scenario_id="clean",
+                severity=0.0,
+            )
+            stressed_rows = _result_rows_for_point(
+                split_results,
+                model_id=model_id,
+                protocol=protocol,
+                scenario_id=scenario_id,
+                severity=severity,
+            )
+            clean_stats = _aggregate_seeded_metric_stats(clean_rows, metric_key, ci=False)
+            drop_stats = _paired_clean_stress_stats(clean_rows, stressed_rows, metric_key, ci=False)
+            retention_stats = _paired_retention_stats(clean_rows, stressed_rows, metric_key, ci=False)
+            worst_split_means.append(_safe_float(summary_row.get("mean", "")))
+            clean_split_means.append(clean_stats.stats.mean)
+            drop_split_means.append(drop_stats.stats.mean)
+            retention_split_means.append(retention_stats.stats.mean)
+
+        worst_stats = _aggregate_metric_stats(worst_split_means, ci=ci)
+        clean_stats = _aggregate_metric_stats(clean_split_means, ci=ci)
+        drop_stats = _aggregate_metric_stats(drop_split_means, ci=ci)
+        retention_stats = _aggregate_metric_stats(retention_split_means, ci=ci)
+        claim_scope = _claim_scope(oracle_labels=oracle_labels, protocol=protocol)
+        out.append(
+            {
+                **_allocation_fields(allocation),
+                "dataset_id": dataset_id,
+                "model_id": model_id,
+                "protocol": protocol,
+                "metric": metric_key,
+                "worst_scenario_id": scenario_id,
+                "worst_severity": float(severity),
+                "oracle_labels": bool(oracle_labels),
+                "claim_scope": claim_scope,
+                "operational_ranking_eligible": not bool(oracle_labels),
+                "worst_mean": worst_stats.mean,
+                "worst_std": worst_stats.std,
+                "worst_ci_lower": worst_stats.ci_lower,
+                "worst_ci_upper": worst_stats.ci_upper,
+                "clean_mean": clean_stats.mean,
+                "clean_std": clean_stats.std,
+                "clean_ci_lower": clean_stats.ci_lower,
+                "clean_ci_upper": clean_stats.ci_upper,
+                "drop_from_clean_mean": drop_stats.mean,
+                "drop_from_clean_std": drop_stats.std,
+                "drop_from_clean_ci_lower": drop_stats.ci_lower,
+                "drop_from_clean_ci_upper": drop_stats.ci_upper,
+                "retention_fraction_mean": retention_stats.mean,
+                "retention_fraction_std": retention_stats.std,
+                "retention_fraction_ci_lower": retention_stats.ci_lower,
+                "retention_fraction_ci_upper": retention_stats.ci_upper,
+                "n_splits": worst_stats.n,
+                "min_runs_per_split": min(
+                    (_safe_int(row.get("n_runs", 0)) for row in selected_rows),
+                    default=0,
+                ),
+                "min_training_seeds_per_split": min(
+                    (_safe_int(row.get("n_training_seeds", 0)) for row in selected_rows),
+                    default=0,
+                ),
+                "min_graph_seeds_per_split": min(
+                    (_safe_int(row.get("n_graph_seeds", 0)) for row in selected_rows),
+                    default=0,
+                ),
+                "ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "drop_ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "retention_ci_method": _ci_method(ci, CI_METHOD_SPLIT),
+                "selection_method": "minimum_configured_nonzero_point_cross_split_mean",
             }
         )
     return out
@@ -1376,8 +2181,8 @@ def run_plots_stage(
     for dataset_id, split_id, protocol in ds_splits:
         ok_g = [r for r in ok if r.dataset_id == dataset_id and r.split_id == split_id and r.protocol == protocol]
 
-        clean_by_model: dict[str, dict[str, MetricStats]] = {}
-        clean_rows_by_model: dict[str, dict[str, list[float]]] = {}
+        clean_by_model: dict[str, dict[str, SeededMetricStats]] = {}
+        clean_rows_by_model: dict[str, list[ResultRow]] = {}
         for model_id in model_ids:
             sel = [
                 r
@@ -1385,11 +2190,13 @@ def run_plots_stage(
                 if r.model_id == model_id and r.scenario_id == "clean" and float(r.severity) == 0.0
             ]
             clean_by_model[model_id] = {}
-            clean_rows_by_model[model_id] = {}
+            clean_rows_by_model[model_id] = list(sel)
             for metric_key, _metric_label in metrics:
-                vals = _metric_values(sel, metric_key)
-                clean_by_model[model_id][metric_key] = _aggregate_metric_stats(vals, ci=ci)
-                clean_rows_by_model[model_id][metric_key] = vals
+                clean_by_model[model_id][metric_key] = _aggregate_seeded_metric_stats(
+                    sel,
+                    metric_key,
+                    ci=ci,
+                )
 
         out_group_dir = plots_dir / protocol / dataset_id / split_id
 
@@ -1405,10 +2212,11 @@ def run_plots_stage(
                 plot_rows: list[dict[str, Any]] = []
 
                 for model_id in model_ids:
-                    clean_stats = clean_by_model.get(model_id, {}).get(
+                    clean_seeded = clean_by_model.get(model_id, {}).get(
                         metric_key,
-                        MetricStats(float("nan"), float("nan"), 0, float("nan"), float("nan")),
+                        _empty_seeded_stats(ci=ci, method=CI_METHOD_CROSSED_SEEDS),
                     )
+                    clean_stats = clean_seeded.stats
                     clean_row = {
                         "dataset_id": dataset_id,
                         "split_id": split_id,
@@ -1418,11 +2226,17 @@ def run_plots_stage(
                         "protocol": protocol,
                         "metric": metric_key,
                         "oracle_labels": oracle_labels,
+                        "claim_scope": _claim_scope(oracle_labels=oracle_labels, protocol=protocol),
+                        "operational_ranking_eligible": not oracle_labels,
                         "mean": clean_stats.mean,
                         "std": clean_stats.std,
                         "ci_lower": clean_stats.ci_lower,
                         "ci_upper": clean_stats.ci_upper,
                         "n_runs": clean_stats.n,
+                        "n_training_seeds": clean_seeded.n_training_seeds,
+                        "n_graph_seeds": clean_seeded.n_graph_seeds,
+                        "n_seed_cells": clean_seeded.n_seed_cells,
+                        "ci_method": clean_seeded.ci_method,
                         "source": "clean",
                     }
                     summary_rows.append(dict(clean_row))
@@ -1436,7 +2250,8 @@ def run_plots_stage(
                             and r.scenario_id == scenario_id
                             and float(r.severity) == float(severity)
                         ]
-                        stats = _aggregate_metric_stats(_metric_values(sel, metric_key), ci=ci)
+                        seeded = _aggregate_seeded_metric_stats(sel, metric_key, ci=ci)
+                        stats = seeded.stats
                         row = {
                             "dataset_id": dataset_id,
                             "split_id": split_id,
@@ -1446,11 +2261,17 @@ def run_plots_stage(
                             "protocol": protocol,
                             "metric": metric_key,
                             "oracle_labels": oracle_labels,
+                            "claim_scope": _claim_scope(oracle_labels=oracle_labels, protocol=protocol),
+                            "operational_ranking_eligible": not oracle_labels,
                             "mean": stats.mean,
                             "std": stats.std,
                             "ci_lower": stats.ci_lower,
                             "ci_upper": stats.ci_upper,
                             "n_runs": stats.n,
+                            "n_training_seeds": seeded.n_training_seeds,
+                            "n_graph_seeds": seeded.n_graph_seeds,
+                            "n_seed_cells": seeded.n_seed_cells,
+                            "ci_method": seeded.ci_method,
                             "source": "scenario",
                         }
                         summary_rows.append(dict(row))
@@ -1477,7 +2298,7 @@ def run_plots_stage(
                 max_severity = float(max(sevs_nonzero)) if sevs_nonzero else None
                 if max_severity is not None:
                     for model_id in model_ids:
-                        clean_vals = clean_rows_by_model.get(model_id, {}).get(metric_key, [])
+                        clean_sel = clean_rows_by_model.get(model_id, [])
                         stressed_sel = [
                             r
                             for r in ok_g
@@ -1485,10 +2306,17 @@ def run_plots_stage(
                             and r.scenario_id == scenario_id
                             and float(r.severity) == float(max_severity)
                         ]
-                        stressed_vals = _metric_values(stressed_sel, metric_key)
-                        clean_stats = _aggregate_metric_stats(clean_vals, ci=ci)
-                        stressed_stats = _aggregate_metric_stats(stressed_vals, ci=ci)
-                        drop_stats = _bootstrap_difference_stats(clean_vals, stressed_vals, ci=ci)
+                        clean_seeded = _aggregate_seeded_metric_stats(clean_sel, metric_key, ci=ci)
+                        stressed_seeded = _aggregate_seeded_metric_stats(stressed_sel, metric_key, ci=ci)
+                        paired_drop = _paired_clean_stress_stats(
+                            clean_sel,
+                            stressed_sel,
+                            metric_key,
+                            ci=ci,
+                        )
+                        clean_stats = clean_seeded.stats
+                        stressed_stats = stressed_seeded.stats
+                        drop_stats = paired_drop.stats
                         drop_rows.append(
                             {
                                 "dataset_id": dataset_id,
@@ -1499,6 +2327,8 @@ def run_plots_stage(
                                 "metric": metric_key,
                                 "max_severity": max_severity,
                                 "oracle_labels": oracle_labels,
+                                "claim_scope": _claim_scope(oracle_labels=oracle_labels, protocol=protocol),
+                                "operational_ranking_eligible": not oracle_labels,
                                 "clean_mean": clean_stats.mean,
                                 "clean_std": clean_stats.std,
                                 "clean_ci_lower": clean_stats.ci_lower,
@@ -1513,6 +2343,10 @@ def run_plots_stage(
                                 "drop_ci_upper": drop_stats.ci_upper,
                                 "n_clean_runs": clean_stats.n,
                                 "n_max_runs": stressed_stats.n,
+                                "n_paired_seed_cells": paired_drop.n_seed_cells,
+                                "n_paired_training_seeds": paired_drop.n_training_seeds,
+                                "n_graph_seeds": paired_drop.n_graph_seeds,
+                                "ci_method": paired_drop.ci_method,
                             }
                         )
 
@@ -1521,24 +2355,28 @@ def run_plots_stage(
 
                 x_values = [float(sev) for sev in sevs_plot]
                 for model_id in model_ids:
-                    values_by_severity = []
+                    rows_by_severity: list[list[ResultRow]] = []
                     for severity in sevs_plot:
                         if float(severity) == 0.0:
-                            values_by_severity.append(clean_rows_by_model.get(model_id, {}).get(metric_key, []))
+                            rows_by_severity.append(clean_rows_by_model.get(model_id, []))
                         else:
-                            values_by_severity.append(
-                                _metric_values(
-                                    [
-                                        r
-                                        for r in ok_g
-                                        if r.model_id == model_id
-                                        and r.scenario_id == scenario_id
-                                        and float(r.severity) == float(severity)
-                                    ],
-                                    metric_key,
-                                )
+                            rows_by_severity.append(
+                                [
+                                    r
+                                    for r in ok_g
+                                    if r.model_id == model_id
+                                    and r.scenario_id == scenario_id
+                                    and float(r.severity) == float(severity)
+                                ]
                             )
-                    auc_stats, avg_stats = _bootstrap_robustness_stats(x_values, values_by_severity, ci=ci)
+                    auc_seeded, avg_seeded, min_runs = _paired_curve_robustness_stats(
+                        x_values,
+                        rows_by_severity,
+                        metric_key,
+                        ci=ci,
+                    )
+                    auc_stats = auc_seeded.stats
+                    avg_stats = avg_seeded.stats
                     robust_rows.append(
                         {
                             "dataset_id": dataset_id,
@@ -1548,6 +2386,8 @@ def run_plots_stage(
                             "protocol": protocol,
                             "metric": metric_key,
                             "oracle_labels": oracle_labels,
+                            "claim_scope": _claim_scope(oracle_labels=oracle_labels, protocol=protocol),
+                            "operational_ranking_eligible": not oracle_labels,
                             "robustness_auc_mean": auc_stats.mean,
                             "robustness_auc_std": auc_stats.std,
                             "robustness_auc_ci_lower": auc_stats.ci_lower,
@@ -1556,9 +2396,23 @@ def run_plots_stage(
                             "robustness_avg_metric_std": avg_stats.std,
                             "robustness_avg_metric_ci_lower": avg_stats.ci_lower,
                             "robustness_avg_metric_ci_upper": avg_stats.ci_upper,
-                            "min_n_runs_per_severity": avg_stats.n,
+                            "min_n_runs_per_severity": min_runs,
+                            "n_paired_seed_cells": avg_seeded.n_seed_cells,
+                            "n_training_seeds": avg_seeded.n_training_seeds,
+                            "n_graph_seeds": avg_seeded.n_graph_seeds,
+                            "ci_method": avg_seeded.ci_method,
                         }
                     )
+
+    protocol_contrast_rows = _build_protocol_contrast_rows(
+        ok,
+        severity_grid=severity_grid,
+        scenario_meta=scenario_meta,
+        model_ids=model_ids,
+        metric_keys=[metric_key for metric_key, _metric_label in metrics],
+        ci=ci,
+    )
+    worst_case_rows = _build_worst_case_rows(summary_rows, ok, ci=ci)
 
     _write_csv(
         plots_dir / "summary_curves.csv",
@@ -1571,11 +2425,17 @@ def run_plots_stage(
             "protocol",
             "metric",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "mean",
             "std",
             "ci_lower",
             "ci_upper",
             "n_runs",
+            "n_training_seeds",
+            "n_graph_seeds",
+            "n_seed_cells",
+            "ci_method",
             "source",
         ],
         summary_rows,
@@ -1591,6 +2451,8 @@ def run_plots_stage(
             "metric",
             "max_severity",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "clean_mean",
             "clean_std",
             "clean_ci_lower",
@@ -1605,6 +2467,10 @@ def run_plots_stage(
             "drop_ci_upper",
             "n_clean_runs",
             "n_max_runs",
+            "n_paired_seed_cells",
+            "n_paired_training_seeds",
+            "n_graph_seeds",
+            "ci_method",
         ],
         drop_rows,
     )
@@ -1618,6 +2484,8 @@ def run_plots_stage(
             "protocol",
             "metric",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "robustness_auc_mean",
             "robustness_auc_std",
             "robustness_auc_ci_lower",
@@ -1627,8 +2495,80 @@ def run_plots_stage(
             "robustness_avg_metric_ci_lower",
             "robustness_avg_metric_ci_upper",
             "min_n_runs_per_severity",
+            "n_paired_seed_cells",
+            "n_training_seeds",
+            "n_graph_seeds",
+            "ci_method",
         ],
         robust_rows,
+    )
+    _write_csv(
+        plots_dir / "protocol_contrasts.csv",
+        [
+            "dataset_id",
+            "split_id",
+            "scenario_id",
+            "severity",
+            "model_id",
+            "metric",
+            "oracle_labels",
+            "claim_scope",
+            "left_claim_scope",
+            "right_claim_scope",
+            "operational_ranking_eligible",
+            "left_protocol",
+            "right_protocol",
+            "contrast_definition",
+            "left_mean",
+            "right_mean",
+            "contrast_mean",
+            "contrast_std",
+            "contrast_ci_lower",
+            "contrast_ci_upper",
+            "n_pairs",
+            "n_training_seeds",
+            "n_graph_seeds",
+            "ci_method",
+            "source",
+        ],
+        protocol_contrast_rows,
+    )
+    _write_csv(
+        plots_dir / "worst_case_performance.csv",
+        [
+            "dataset_id",
+            "split_id",
+            "model_id",
+            "protocol",
+            "metric",
+            "worst_scenario_id",
+            "worst_severity",
+            "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
+            "worst_mean",
+            "worst_std",
+            "worst_ci_lower",
+            "worst_ci_upper",
+            "clean_mean",
+            "drop_from_clean_mean",
+            "drop_from_clean_std",
+            "drop_from_clean_ci_lower",
+            "drop_from_clean_ci_upper",
+            "retention_fraction_mean",
+            "retention_fraction_std",
+            "retention_fraction_ci_lower",
+            "retention_fraction_ci_upper",
+            "n_runs",
+            "n_training_seeds",
+            "n_graph_seeds",
+            "n_paired_seed_cells",
+            "ci_method",
+            "drop_ci_method",
+            "retention_ci_method",
+            "selection_method",
+        ],
+        worst_case_rows,
     )
     _write_csv(
         plots_dir / "performance_audit_join.csv",
@@ -1686,25 +2626,61 @@ def run_plots_stage(
             "audit_metric_label",
             "audit_metric_unit",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "graph_view_mode",
             "mean",
             "std",
             "ci_lower",
             "ci_upper",
             "n_graphs",
+            "n_graph_seeds",
+            "ci_method",
             "source",
         ],
         audit_summary_rows,
     )
 
-    cross_split_summary_rows = _build_cross_split_summary_rows(summary_rows, ci=ci)
-    cross_split_drop_rows = _build_cross_split_drop_rows(drop_rows, ci=ci)
-    cross_split_robust_rows = _build_cross_split_robust_rows(robust_rows, ci=ci)
-    cross_split_audit_rows = _build_cross_split_audit_rows(audit_summary_rows, ci=ci)
+    split_allocations = _split_allocations_from_config(cfg)
+    cross_split_summary_rows = _build_cross_split_summary_rows(
+        summary_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_drop_rows = _build_cross_split_drop_rows(
+        drop_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_robust_rows = _build_cross_split_robust_rows(
+        robust_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_audit_rows = _build_cross_split_audit_rows(
+        audit_summary_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_protocol_contrast_rows = _build_cross_split_protocol_contrast_rows(
+        protocol_contrast_rows,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
+    cross_split_worst_case_rows = _build_cross_split_worst_case_rows(
+        summary_rows,
+        ok,
+        split_allocations=split_allocations,
+        ci=ci,
+    )
 
     _write_csv(
         plots_dir / "summary_curves_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "severity",
@@ -1712,11 +2688,16 @@ def run_plots_stage(
             "protocol",
             "metric",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "mean",
             "std",
             "ci_lower",
             "ci_upper",
             "n_splits",
+            "min_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
             "source",
         ],
         cross_split_summary_rows,
@@ -1724,6 +2705,10 @@ def run_plots_stage(
     _write_csv(
         plots_dir / "performance_drop_max_stress_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "model_id",
@@ -1731,6 +2716,8 @@ def run_plots_stage(
             "metric",
             "max_severity",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "clean_mean",
             "clean_std",
             "clean_ci_lower",
@@ -1744,18 +2731,27 @@ def run_plots_stage(
             "drop_ci_lower",
             "drop_ci_upper",
             "n_splits",
+            "min_paired_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
         ],
         cross_split_drop_rows,
     )
     _write_csv(
         plots_dir / "robustness_scores_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "model_id",
             "protocol",
             "metric",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "robustness_auc_mean",
             "robustness_auc_std",
             "robustness_auc_ci_lower",
@@ -1765,12 +2761,19 @@ def run_plots_stage(
             "robustness_avg_metric_ci_lower",
             "robustness_avg_metric_ci_upper",
             "n_splits",
+            "min_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
         ],
         cross_split_robust_rows,
     )
     _write_csv(
         plots_dir / "audit_curves_cross_split.csv",
         [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
             "dataset_id",
             "scenario_id",
             "severity",
@@ -1779,31 +2782,131 @@ def run_plots_stage(
             "audit_metric_label",
             "audit_metric_unit",
             "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
             "graph_view_mode",
             "mean",
             "std",
             "ci_lower",
             "ci_upper",
             "n_splits",
+            "min_graph_seeds_per_split",
+            "ci_method",
             "source",
         ],
         cross_split_audit_rows,
     )
+    _write_csv(
+        plots_dir / "protocol_contrasts_cross_split.csv",
+        [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
+            "dataset_id",
+            "scenario_id",
+            "severity",
+            "model_id",
+            "metric",
+            "oracle_labels",
+            "claim_scope",
+            "left_claim_scope",
+            "right_claim_scope",
+            "operational_ranking_eligible",
+            "left_protocol",
+            "right_protocol",
+            "contrast_definition",
+            "left_mean",
+            "right_mean",
+            "contrast_mean",
+            "contrast_std",
+            "contrast_ci_lower",
+            "contrast_ci_upper",
+            "n_splits",
+            "min_pairs_per_split",
+            "min_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
+            "source",
+        ],
+        cross_split_protocol_contrast_rows,
+    )
+    _write_csv(
+        plots_dir / "worst_case_performance_cross_split.csv",
+        [
+            "split_regime_id",
+            "train_size",
+            "val_size",
+            "test_size",
+            "dataset_id",
+            "model_id",
+            "protocol",
+            "metric",
+            "worst_scenario_id",
+            "worst_severity",
+            "oracle_labels",
+            "claim_scope",
+            "operational_ranking_eligible",
+            "worst_mean",
+            "worst_std",
+            "worst_ci_lower",
+            "worst_ci_upper",
+            "clean_mean",
+            "clean_std",
+            "clean_ci_lower",
+            "clean_ci_upper",
+            "drop_from_clean_mean",
+            "drop_from_clean_std",
+            "drop_from_clean_ci_lower",
+            "drop_from_clean_ci_upper",
+            "retention_fraction_mean",
+            "retention_fraction_std",
+            "retention_fraction_ci_lower",
+            "retention_fraction_ci_upper",
+            "n_splits",
+            "min_runs_per_split",
+            "min_training_seeds_per_split",
+            "min_graph_seeds_per_split",
+            "ci_method",
+            "drop_ci_method",
+            "retention_ci_method",
+            "selection_method",
+        ],
+        cross_split_worst_case_rows,
+    )
 
-    split_counts_by_dataset_protocol: dict[tuple[str, str], set[str]] = {}
+    split_counts_by_dataset_protocol: dict[tuple[str, str, str], set[str]] = {}
     for row in summary_rows:
-        key = (str(row.get("dataset_id", "")), str(row.get("protocol", "")))
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        key = (
+            str(row.get("dataset_id", "")),
+            str(row.get("protocol", "")),
+            allocation.split_regime_id,
+        )
         split_counts_by_dataset_protocol.setdefault(key, set()).add(str(row.get("split_id", "")))
 
-    for dataset_id, protocol in sorted(split_counts_by_dataset_protocol):
-        if len(split_counts_by_dataset_protocol[(dataset_id, protocol)]) <= 1:
+    regimes_by_dataset_protocol: dict[tuple[str, str], set[str]] = {}
+    for dataset_id, protocol, split_regime_id in split_counts_by_dataset_protocol:
+        regimes_by_dataset_protocol.setdefault((dataset_id, protocol), set()).add(split_regime_id)
+
+    for dataset_id, protocol, split_regime_id in sorted(split_counts_by_dataset_protocol):
+        if len(split_counts_by_dataset_protocol[(dataset_id, protocol, split_regime_id)]) <= 1:
             continue
         dataset_rows = [
             row
             for row in cross_split_summary_rows
-            if str(row.get("dataset_id", "")) == dataset_id and str(row.get("protocol", "")) == protocol
+            if str(row.get("dataset_id", "")) == dataset_id
+            and str(row.get("protocol", "")) == protocol
+            and str(row.get("split_regime_id", "")) == split_regime_id
         ]
         out_group_dir = plots_dir / protocol / dataset_id / "across_splits"
+        if len(regimes_by_dataset_protocol[(dataset_id, protocol)]) > 1:
+            out_group_dir = out_group_dir / split_regime_id
+        split_label = (
+            "across_splits"
+            if split_regime_id == UNSPECIFIED_SPLIT_REGIME_ID
+            else f"across_splits [{split_regime_id}]"
+        )
         for scenario_cfg in cfg.get("scenarios", []):
             scenario_id = str(scenario_cfg.get("scenario_id", ""))
             oracle_labels = _scenario_oracle_labels(scenario_meta, scenario_id)
@@ -1822,7 +2925,7 @@ def run_plots_stage(
                     metric_rows,
                     out_group_dir=out_group_dir,
                     dataset_id=dataset_id,
-                    split_label="across_splits",
+                    split_label=split_label,
                     protocol=protocol,
                     scenario_id=scenario_id,
                     scenario_display_name=scenario_display_name,
@@ -1875,20 +2978,38 @@ def run_plots_stage(
                         plt=plt,
                     )
 
-    split_counts_by_dataset_protocol_audit: dict[tuple[str, str], set[str]] = {}
+    split_counts_by_dataset_protocol_audit: dict[tuple[str, str, str], set[str]] = {}
     for row in audit_summary_rows:
-        key = (str(row.get("dataset_id", "")), str(row.get("protocol", "")))
+        allocation = _allocation_for_split(row.get("split_id", ""), split_allocations)
+        key = (
+            str(row.get("dataset_id", "")),
+            str(row.get("protocol", "")),
+            allocation.split_regime_id,
+        )
         split_counts_by_dataset_protocol_audit.setdefault(key, set()).add(str(row.get("split_id", "")))
 
-    for dataset_id, protocol in sorted(split_counts_by_dataset_protocol_audit):
-        if len(split_counts_by_dataset_protocol_audit[(dataset_id, protocol)]) <= 1:
+    regimes_by_dataset_protocol_audit: dict[tuple[str, str], set[str]] = {}
+    for dataset_id, protocol, split_regime_id in split_counts_by_dataset_protocol_audit:
+        regimes_by_dataset_protocol_audit.setdefault((dataset_id, protocol), set()).add(split_regime_id)
+
+    for dataset_id, protocol, split_regime_id in sorted(split_counts_by_dataset_protocol_audit):
+        if len(split_counts_by_dataset_protocol_audit[(dataset_id, protocol, split_regime_id)]) <= 1:
             continue
         dataset_rows = [
             row
             for row in cross_split_audit_rows
-            if str(row.get("dataset_id", "")) == dataset_id and str(row.get("protocol", "")) == protocol
+            if str(row.get("dataset_id", "")) == dataset_id
+            and str(row.get("protocol", "")) == protocol
+            and str(row.get("split_regime_id", "")) == split_regime_id
         ]
         out_group_dir = plots_dir / protocol / dataset_id / "across_splits"
+        if len(regimes_by_dataset_protocol_audit[(dataset_id, protocol)]) > 1:
+            out_group_dir = out_group_dir / split_regime_id
+        split_label = (
+            "across_splits"
+            if split_regime_id == UNSPECIFIED_SPLIT_REGIME_ID
+            else f"across_splits [{split_regime_id}]"
+        )
         for scenario_cfg in cfg.get("scenarios", []):
             scenario_id = str(scenario_cfg.get("scenario_id", ""))
             oracle_labels = _scenario_oracle_labels(scenario_meta, scenario_id)
@@ -1905,7 +3026,7 @@ def run_plots_stage(
                     metric_rows,
                     out_group_dir=out_group_dir,
                     dataset_id=dataset_id,
-                    split_label="across_splits",
+                    split_label=split_label,
                     protocol=protocol,
                     scenario_id=scenario_id,
                     scenario_display_name=scenario_display_name,

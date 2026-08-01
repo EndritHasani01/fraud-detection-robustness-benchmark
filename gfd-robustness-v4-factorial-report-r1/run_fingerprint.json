@@ -1,0 +1,132 @@
+{
+  "sha256": "e419afb9dcdffa3c922c355b3964e9d06e54164b7bcef01646262a7c2814dd41",
+  "components": {
+    "notebook_implementation_id": "single-source-v4-factorial-r1-2026-07-13",
+    "config_sha256": "77d2215791b18233b2ba3b079431ac09941e0e7528c934649e9793b64245b909",
+    "embedded_module_hashes": {
+      "benchmark/__init__.py": "008eb53bd5017dc14bb632686bcdde16fb115192c4285102d6ef4ddc2f5b1136",
+      "benchmark/baselines.py": "8aeee8545234df3e92e25ee6a0e4af8a8df93509266c8ee943ad8ade5081a7a5",
+      "benchmark/baselines_stage.py": "263138ebd969bf90538d546015784783ec7fbdd8e956a1d77b57d9f2b28354ed",
+      "benchmark/cache.py": "69269d90d92a003f0e71f9ba72e0ff6622f5074b326dfee9b39aafa3c5cfc5c4",
+      "benchmark/config.py": "5bfe7d705fe6c82e0dbaa68c22b0a7703f945ba089c018370eee30357970e5eb",
+      "benchmark/data.py": "9366cc804a771ee3b92a87743c09ec0af11d79a0ad4064bcf204a48c717f1c46",
+      "benchmark/matrix_stage.py": "4a1c6f4d7f37625bdbc33ea038d9664d3465c70ea5ad55f91b3ce442b8a407dc",
+      "benchmark/metrics.py": "0c45acec57f93e0a076cea2130bc2a8176b3f48d7dcb32d4bfb0dc188deff3d2",
+      "benchmark/paths.py": "2dcf4fd63883831422fb7ad2efcb9c669ecb4bda33f9a269d2f528a0805e4d1f",
+      "benchmark/plots_stage.py": "42a8ccc21c7712b14bdd115ba6bb3d3365f6c1d3464ec2843ec4207c2a5b264f",
+      "benchmark/pmp_stage.py": "f26bb909c7b2e381b38d8a037bdfef711beafb8778f1882405002c2ea131dae0",
+      "benchmark/preflight.py": "a002626d41e3ccdc5e0ed3b3289145b8e99b1c0f9bdacd12d1044c699594bfff",
+      "benchmark/relation_utils.py": "af6bc1c7e1af41a1c0bb12dd5e7f6ece12a9bfca8ee56c63f10acc3550040477",
+      "benchmark/results.py": "9cf5740eb6e9a33ad111020ded3a6dd7f455bc8e2722339528d2f6bd9046b4b7",
+      "benchmark/run.py": "ef0ca86b4691fcadcac9ed6a87d06e673018ddf349a681d860b656603fa2df41",
+      "benchmark/scenario_audit.py": "6fc4de26503b77cfc83f02a76cbf850fdf2116dbb692d5ea2d460274f0b4ae20",
+      "benchmark/scenarios.py": "ad43d9e4453e0bcbd60018eaac72d13a86569bac5dc6536567440487818861f0",
+      "benchmark/secgfd_stage.py": "d4dcb37c610a07e0c3cf2674a43234bac1f65150caee4af38b068851b20e7d34",
+      "benchmark/shift_stage.py": "552dd429c5672d704dc85d3175b0be4369c584d0245808f30851342fad657d49",
+      "benchmark/stats.py": "2b55e2fa42a327365412e28690281e5e1c359ab207b99a7b86b6b9a1aeb8f386",
+      "benchmark/summarize.py": "072d496929675b2d4caa43a05dd9e78eeb5cc5b1a51ac8676f7e7a7b7c6bc816",
+      "benchmark/variants.py": "acc7dfb5fc1d18147a1dc3965df01be8cf79bb3e9f915e5f1d706bf1a5cc3184"
+    },
+    "active_upstreams": {
+      "pmp": {
+        "url": "https://github.com/Xtra-Computing/PMP",
+        "commit": "3f7629f6c180891a0bc1bba3c66d94d288a1ddae"
+      },
+      "secgfd": {
+        "url": "https://github.com/Sunxkissed/SEC-GFD",
+        "commit": "97faa51145ed1fbcbdc67cc5d399490da9a9797a"
+      }
+    },
+    "upstream_patch_sha256": {
+      "pmp": "2b8acfbdf10a389b4801ebbdc0c71c659ae07efbf83fbe7ca4ac0867e4349586",
+      "secgfd": "09749601bb7ccdf2bb29db2d6002eddfd44a68815999bb90ba6a4d2e783a8b4c"
+    },
+    "upstream_patched_file_hashes": {
+      "pmp": {
+        "model/LASAGE_S.py": "564ce5bf10c16e21c20f3fb2eeaf1fa67cfd9f0664b6eeb4e314c283c74946f4",
+        "model/base.py": "b71917eecea18555a526cb3cdb3391d5d1ff357b365bc377e1c24d6c3b87cbbb"
+      },
+      "secgfd": {
+        "model/SECGFD.py": "3599bc1b12d7628b2cb2868346f78f5dd7499eb29f76066f7eb5e7917cc4530e"
+      }
+    },
+    "isolated_package_freeze": [
+      "certifi==2026.6.17",
+      "charset-normalizer==3.4.9",
+      "contourpy==1.3.3",
+      "cycler==0.12.1",
+      "dgl==1.1.3+cu118",
+      "filelock==3.29.0",
+      "fonttools==4.63.0",
+      "fsspec==2026.4.0",
+      "idna==3.18",
+      "iniconfig==2.3.0",
+      "Jinja2==3.1.6",
+      "kiwisolver==1.5.0",
+      "MarkupSafe==3.0.3",
+      "matplotlib==3.9.2",
+      "mpmath==1.3.0",
+      "networkx==3.6.1",
+      "numpy==1.26.4",
+      "nvidia-cuda-runtime-cu11 @ https://download.pytorch.org/whl/cu118/nvidia_cuda_runtime_cu11-11.8.89-py3-none-manylinux1_x86_64.whl#sha256=f587bd726eb2f7612cf77ce38a2c1e65cf23251ff49437f6161ce0d647f64f7c",
+      "nvidia-cusparse-cu11 @ https://download.pytorch.org/whl/cu118/nvidia_cusparse_cu11-11.7.5.86-py3-none-manylinux1_x86_64.whl#sha256=4ae709fe78d3f23f60acaba8c54b8ad556cf16ca486e0cc1aa92dca7555d2d2b",
+      "packaging==26.2",
+      "pandas==2.2.3",
+      "pillow==12.3.0",
+      "pluggy==1.6.0",
+      "psutil==7.2.2",
+      "pyparsing==3.3.2",
+      "pytest==8.3.5",
+      "python-dateutil==2.9.0.post0",
+      "pytz==2026.2",
+      "PyYAML==6.0.2",
+      "requests==2.34.2",
+      "scipy==1.11.4",
+      "six==1.17.0",
+      "sympy==1.12",
+      "torch==2.1.0+cu118",
+      "tqdm==4.67.1",
+      "triton==2.1.0",
+      "typing_extensions==4.15.0",
+      "tzdata==2026.3",
+      "urllib3==2.7.0"
+    ],
+    "isolated_runtime": [
+      {
+        "torch": "2.1.0+cu118",
+        "dgl": "1.1.3+cu118",
+        "numpy": "1.26.4",
+        "logical_device_count": 1,
+        "gpu_name": "Tesla T4",
+        "graph_device": "cuda:0",
+        "aggregation_sum": 2000.0,
+        "physical_gpu": 0
+      },
+      {
+        "torch": "2.1.0+cu118",
+        "dgl": "1.1.3+cu118",
+        "numpy": "1.26.4",
+        "logical_device_count": 1,
+        "gpu_name": "Tesla T4",
+        "graph_device": "cuda:0",
+        "aggregation_sum": 2000.0,
+        "physical_gpu": 1
+      }
+    ],
+    "uv_version": "uv 0.11.13 (x86_64-unknown-linux-gnu)",
+    "gpus_and_driver": [
+      {
+        "index": 0,
+        "name": "Tesla T4",
+        "memory_mib": 15360,
+        "driver": "580.159.04"
+      },
+      {
+        "index": 1,
+        "name": "Tesla T4",
+        "memory_mib": 15360,
+        "driver": "580.159.04"
+      }
+    ]
+  }
+}

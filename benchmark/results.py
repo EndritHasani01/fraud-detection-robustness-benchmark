@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import threading
 from pathlib import Path
 from typing import Any, Mapping
@@ -35,6 +36,12 @@ RESULTS_COLUMNS = [
     "f1_macro",
     "threshold",
     "duration_sec",
+    # training diagnostics (blank for historical rows or failures before training)
+    "epochs_trained",
+    "best_epoch",
+    "best_validation_monitor",
+    "validation_monitor",
+    "stopping_reason",
     # graph stats (always available)
     "n_nodes",
     "n_edges",
@@ -275,13 +282,45 @@ def write_result_row(
         effective_duration = metrics.get("duration_sec", "")
         if duration_sec is not None:
             effective_duration = float(duration_sec)
+        validated_metrics: dict[str, float] = {}
+        for metric_name in ("roc_auc", "average_precision", "f1_macro"):
+            try:
+                metric_value = float(metrics.get(metric_name, ""))
+            except Exception as e:
+                raise ValueError(f"Result metric '{metric_name}' is not numeric.") from e
+            if not math.isfinite(metric_value) or not 0.0 <= metric_value <= 1.0:
+                raise ValueError(
+                    f"Result metric '{metric_name}' must be finite and within [0, 1]; "
+                    f"found {metric_value!r}."
+                )
+            validated_metrics[metric_name] = metric_value
+        try:
+            threshold = float(metrics.get("threshold", ""))
+        except Exception as e:
+            raise ValueError("Result metric 'threshold' is not numeric.") from e
+        if not math.isfinite(threshold):
+            raise ValueError(
+                "Result metric 'threshold' must be finite; "
+                f"found {threshold!r}."
+            )
+        validated_metrics["threshold"] = threshold
+        try:
+            effective_duration = float(effective_duration)
+        except Exception as e:
+            raise ValueError("Result duration_sec is not numeric.") from e
+        if not math.isfinite(effective_duration) or effective_duration < 0.0:
+            raise ValueError(
+                f"Result duration_sec must be finite and non-negative; found {effective_duration!r}."
+            )
         row.update(
             {
-                "roc_auc": metrics.get("roc_auc", ""),
-                "average_precision": metrics.get("average_precision", ""),
-                "f1_macro": metrics.get("f1_macro", ""),
-                "threshold": metrics.get("threshold", ""),
+                **validated_metrics,
                 "duration_sec": effective_duration,
+                "epochs_trained": metrics.get("epochs_trained", ""),
+                "best_epoch": metrics.get("best_epoch", ""),
+                "best_validation_monitor": metrics.get("best_validation_monitor", ""),
+                "validation_monitor": metrics.get("validation_monitor", ""),
+                "stopping_reason": metrics.get("stopping_reason", ""),
                 "status": "ok",
                 "error": "",
             }

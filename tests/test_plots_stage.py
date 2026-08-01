@@ -125,6 +125,53 @@ def _write_variant_audit_csv(path: Path, rows: list[dict[str, object]]) -> None:
         append_variant_audit_row(path, row)
 
 
+def _append_result(
+    path: Path,
+    *,
+    split_id: str = "s0",
+    scenario_id: str,
+    severity: float,
+    graph_seed: int,
+    training_seed: int,
+    protocol: str,
+    roc_auc: float,
+    average_precision: float,
+    f1_macro: float,
+) -> None:
+    append_result_row(
+        path,
+        {
+            "experiment_name": "exp",
+            "dataset_id": "yelpchi",
+            "split_id": split_id,
+            "graph_seed": graph_seed,
+            "training_seed": training_seed,
+            "scenario_id": scenario_id,
+            "severity": severity,
+            "model_id": "mlp",
+            "protocol": protocol,
+            "roc_auc": roc_auc,
+            "average_precision": average_precision,
+            "f1_macro": f1_macro,
+            "threshold": 0.5,
+            "duration_sec": 1.0,
+            "n_nodes": 10,
+            "n_edges": 12,
+            "mean_in_degree": 1.2,
+            "median_in_degree": 1.0,
+            "mean_out_degree": 1.2,
+            "median_out_degree": 1.0,
+            "heterophily_ratio": 0.3,
+            "pos_rate": 0.2,
+            "base_graph_path": "clean.bin",
+            "graph_path": "clean.bin" if scenario_id == "clean" else "stress.bin",
+            "train_graph_ref": "clean.bin" if protocol == "train_clean_eval_all" else "stress.bin",
+            "status": "ok",
+            "error": "",
+        },
+    )
+
+
 class _FakeFigure:
     def tight_layout(self) -> None:
         return None
@@ -399,6 +446,11 @@ class PlotsStageTests(unittest.TestCase):
             oracle_rows = [row for row in summary_rows if row["scenario_id"] == "heterophily_rewire_oracle" and row["metric"] == "roc_auc"]
             self.assertTrue(oracle_rows)
             self.assertEqual({row["oracle_labels"] for row in oracle_rows}, {"True"})
+            self.assertEqual(
+                {row["claim_scope"] for row in oracle_rows},
+                {"oracle_privileged_training_diagnostic"},
+            )
+            self.assertEqual({row["operational_ranking_eligible"] for row in oracle_rows}, {"False"})
             self.assertTrue(all("ci_lower" in row and "ci_upper" in row for row in oracle_rows))
 
             cross_rows = _read_csv_rows(out_dir / "plots" / "summary_curves_cross_split.csv")
@@ -413,6 +465,10 @@ class PlotsStageTests(unittest.TestCase):
             self.assertEqual(cross_row["oracle_labels"], "True")
             self.assertEqual(cross_row["n_splits"], "2")
             self.assertAlmostEqual(float(cross_row["mean"]), 0.65, places=6)
+            self.assertEqual(cross_row["split_regime_id"], "allocation_unspecified")
+            self.assertEqual(cross_row["train_size"], "")
+            self.assertEqual(cross_row["val_size"], "")
+            self.assertEqual(cross_row["test_size"], "")
 
             drop_rows = _read_csv_rows(out_dir / "plots" / "performance_drop_max_stress.csv")
             self.assertEqual({row["oracle_labels"] for row in drop_rows}, {"True"})
@@ -455,6 +511,425 @@ class PlotsStageTests(unittest.TestCase):
             self.assertAlmostEqual(float(audit_cross_row["mean"]), 0.525, places=6)
             self.assertTrue((out_dir / "plots" / "train_on_variant" / "yelpchi" / "s0" / "audit__heterophily_rewire_oracle__heterophily_ratio_after.png").exists())
             self.assertTrue(any("(oracle)" in title for title in fake_pyplot.titles))
+
+    def test_cross_split_outputs_keep_allocation_regimes_separate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            variant_rows = []
+            audit_rows = []
+            results_csv = out_dir / "results.csv"
+            ensure_results_csv(results_csv)
+
+            split_scores = {
+                "s0": {"clean": 0.9, "variant": 0.7, "shift": 0.6},
+                "s1": {"clean": 0.8, "variant": 0.5, "shift": 0.4},
+                "s2": {"clean": 0.7, "variant": 0.3, "shift": 0.25},
+                "s3": {"clean": 0.6, "variant": 0.1, "shift": 0.05},
+            }
+            for split_id, scores in split_scores.items():
+                clean_path = out_dir / "graphs" / f"{split_id}_clean.bin"
+                stress_path = out_dir / "graphs" / f"{split_id}_stress.bin"
+                variant_rows.extend(
+                    [
+                        _variant_row(
+                            split_id=split_id,
+                            graph_path=str(clean_path),
+                            base_graph_path=str(clean_path),
+                            scenario_id="clean",
+                            severity=0.0,
+                            oracle_labels=False,
+                        ),
+                        _variant_row(
+                            split_id=split_id,
+                            graph_path=str(stress_path),
+                            base_graph_path=str(clean_path),
+                            scenario_id="noise_edges_uniform",
+                            severity=0.2,
+                            oracle_labels=False,
+                        ),
+                    ]
+                )
+                audit_rows.extend(
+                    [
+                        _audit_row(
+                            split_id=split_id,
+                            scenario_id="clean",
+                            severity=0.0,
+                            graph_seed=0,
+                            oracle_labels=False,
+                            base_graph_path=str(clean_path),
+                            graph_path=str(clean_path),
+                            scenario_family="clean",
+                            scenario_method="clean",
+                            severity_param="severity",
+                        ),
+                        _audit_row(
+                            split_id=split_id,
+                            scenario_id="noise_edges_uniform",
+                            severity=0.2,
+                            graph_seed=0,
+                            oracle_labels=False,
+                            base_graph_path=str(clean_path),
+                            graph_path=str(stress_path),
+                            scenario_family="noise",
+                            scenario_method="add_random_edges",
+                            severity_param="edge_noise_rate",
+                            graph_view_mode="heterograph_aware_generation",
+                            scenario_info={"n_added_edge_pairs_actual": 10},
+                        ),
+                    ]
+                )
+                for protocol, stress_score in (
+                    ("train_on_variant", scores["variant"]),
+                    ("train_clean_eval_all", scores["shift"]),
+                ):
+                    _append_result(
+                        results_csv,
+                        split_id=split_id,
+                        scenario_id="clean",
+                        severity=0.0,
+                        graph_seed=0,
+                        training_seed=0,
+                        protocol=protocol,
+                        roc_auc=scores["clean"],
+                        average_precision=scores["clean"],
+                        f1_macro=scores["clean"],
+                    )
+                    _append_result(
+                        results_csv,
+                        split_id=split_id,
+                        scenario_id="noise_edges_uniform",
+                        severity=0.2,
+                        graph_seed=0,
+                        training_seed=0,
+                        protocol=protocol,
+                        roc_auc=stress_score,
+                        average_precision=stress_score,
+                        f1_macro=stress_score,
+                    )
+
+            _write_variant_csv(out_dir / "graph_variants.csv", variant_rows)
+            _write_variant_audit_csv(out_dir / "variant_audit.csv", audit_rows)
+            cfg = {
+                "models": [{"model_id": "mlp"}],
+                "data_splits": [
+                    {"split_id": "s0", "train_size": 0.4, "val_size": 0.2, "split_seed": 1},
+                    {"split_id": "s1", "train_size": 0.4, "val_size": 0.2, "split_seed": 2},
+                    {"split_id": "s2", "train_size": 0.6, "val_size": 0.2, "split_seed": 3},
+                    {"split_id": "s3", "train_size": 0.6, "val_size": 0.2, "split_seed": 4},
+                ],
+                "seeds": {"training_seeds": [0]},
+                "scenarios": [
+                    {
+                        "scenario_id": "noise_edges_uniform",
+                        "severity_values": [0.0, 0.2],
+                        "oracle_mode": "non_oracle",
+                    }
+                ],
+                "evaluation": {"audit_metrics": ["n_added_edge_pairs_actual"]},
+            }
+
+            fake_matplotlib, fake_pyplot_mod, _fake_pyplot = _fake_matplotlib_modules()
+            with mock.patch.dict(
+                sys.modules,
+                {"matplotlib": fake_matplotlib, "matplotlib.pyplot": fake_pyplot_mod},
+            ):
+                run_plots_stage(
+                    cfg,
+                    out_dir=out_dir,
+                    include_noop=False,
+                    only_clean=False,
+                    max_variants=None,
+                    max_training_seeds=None,
+                    ci=True,
+                )
+
+            cross_summary = _read_csv_rows(out_dir / "plots" / "summary_curves_cross_split.csv")
+            stress_ap = [
+                row
+                for row in cross_summary
+                if row["scenario_id"] == "noise_edges_uniform"
+                and row["severity"] == "0.2"
+                and row["metric"] == "average_precision"
+                and row["protocol"] == "train_on_variant"
+            ]
+            self.assertEqual(len(stress_ap), 2)
+            by_train_size = {row["train_size"]: row for row in stress_ap}
+            self.assertEqual(set(by_train_size), {"0.4", "0.6"})
+            self.assertAlmostEqual(float(by_train_size["0.4"]["mean"]), 0.6, places=12)
+            self.assertAlmostEqual(float(by_train_size["0.6"]["mean"]), 0.2, places=12)
+            self.assertEqual({row["n_splits"] for row in stress_ap}, {"2"})
+            self.assertEqual({row["val_size"] for row in stress_ap}, {"0.2"})
+            self.assertEqual({row["test_size"] for row in stress_ap}, {"0.4", "0.2"})
+
+            for name in (
+                "performance_drop_max_stress_cross_split.csv",
+                "robustness_scores_cross_split.csv",
+                "audit_curves_cross_split.csv",
+            ):
+                rows = _read_csv_rows(out_dir / "plots" / name)
+                self.assertEqual({row["train_size"] for row in rows}, {"0.4", "0.6"})
+                self.assertEqual({row["n_splits"] for row in rows}, {"2"})
+
+            cross_contrasts = _read_csv_rows(
+                out_dir / "plots" / "protocol_contrasts_cross_split.csv"
+            )
+            stress_contrasts = [
+                row
+                for row in cross_contrasts
+                if row["severity"] == "0.2" and row["metric"] == "average_precision"
+            ]
+            contrast_by_train = {row["train_size"]: row for row in stress_contrasts}
+            self.assertAlmostEqual(
+                float(contrast_by_train["0.4"]["contrast_mean"]),
+                0.1,
+                places=12,
+            )
+            self.assertAlmostEqual(
+                float(contrast_by_train["0.6"]["contrast_mean"]),
+                0.05,
+                places=12,
+            )
+            self.assertEqual({row["n_splits"] for row in stress_contrasts}, {"2"})
+
+            cross_worst = _read_csv_rows(
+                out_dir / "plots" / "worst_case_performance_cross_split.csv"
+            )
+            standard_ap_worst = [
+                row
+                for row in cross_worst
+                if row["protocol"] == "train_on_variant"
+                and row["metric"] == "average_precision"
+            ]
+            worst_by_train = {row["train_size"]: row for row in standard_ap_worst}
+            self.assertAlmostEqual(float(worst_by_train["0.4"]["worst_mean"]), 0.6, places=12)
+            self.assertAlmostEqual(float(worst_by_train["0.6"]["worst_mean"]), 0.2, places=12)
+            self.assertEqual(
+                {row["selection_method"] for row in standard_ap_worst},
+                {"minimum_configured_nonzero_point_cross_split_mean"},
+            )
+
+    def test_seed_aware_reporting_preserves_pairing_and_exports_research_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            clean_path = out_dir / "graphs" / "clean.bin"
+            variant_rows = [
+                _variant_row(
+                    split_id="s0",
+                    graph_path=str(clean_path),
+                    base_graph_path=str(clean_path),
+                    scenario_id="clean",
+                    severity=0.0,
+                    oracle_labels=False,
+                    graph_seed=717,
+                )
+            ]
+            audit_rows = [
+                _audit_row(
+                    split_id="s0",
+                    scenario_id="clean",
+                    severity=0.0,
+                    graph_seed=717,
+                    oracle_labels=False,
+                    base_graph_path=str(clean_path),
+                    graph_path=str(clean_path),
+                    scenario_family="clean",
+                    scenario_method="clean",
+                    severity_param="severity",
+                )
+            ]
+            for severity in (0.5, 1.0):
+                for graph_seed in (10, 20):
+                    stress_path = out_dir / "graphs" / f"stress_{severity}_{graph_seed}.bin"
+                    variant_rows.append(
+                        _variant_row(
+                            split_id="s0",
+                            graph_path=str(stress_path),
+                            base_graph_path=str(clean_path),
+                            scenario_id="noise_edges_uniform",
+                            severity=severity,
+                            oracle_labels=False,
+                            graph_seed=graph_seed,
+                        )
+                    )
+                    audit_rows.append(
+                        _audit_row(
+                            split_id="s0",
+                            scenario_id="noise_edges_uniform",
+                            severity=severity,
+                            graph_seed=graph_seed,
+                            oracle_labels=False,
+                            base_graph_path=str(clean_path),
+                            graph_path=str(stress_path),
+                            scenario_family="noise",
+                            scenario_method="add_random_edges",
+                            severity_param="edge_noise_rate",
+                            graph_view_mode="heterograph_aware_generation",
+                            scenario_info={"n_added_edge_pairs_actual": int(10 * severity)},
+                        )
+                    )
+
+            _write_variant_csv(out_dir / "graph_variants.csv", variant_rows)
+            _write_variant_audit_csv(out_dir / "variant_audit.csv", audit_rows)
+
+            results_csv = out_dir / "results.csv"
+            ensure_results_csv(results_csv)
+            clean_metrics = {
+                1: (0.2, 0.3, 0.4),
+                2: (0.8, 0.7, 0.6),
+            }
+            protocols = ("train_on_variant", "train_clean_eval_all")
+            for protocol in protocols:
+                for training_seed, (roc_auc, average_precision, f1_macro) in clean_metrics.items():
+                    _append_result(
+                        results_csv,
+                        scenario_id="clean",
+                        severity=0.0,
+                        graph_seed=717,
+                        training_seed=training_seed,
+                        protocol=protocol,
+                        roc_auc=roc_auc,
+                        average_precision=average_precision,
+                        f1_macro=f1_macro,
+                    )
+
+                for severity in (0.5, 1.0):
+                    for graph_seed in (10, 20):
+                        for training_seed, (_clean_roc, clean_ap, clean_f1) in clean_metrics.items():
+                            # Each paired ROC trajectory has AUC 0.5 even though
+                            # individual seed levels differ substantially.
+                            roc_auc = 0.5 if severity == 0.5 else (0.8 if training_seed == 1 else 0.2)
+                            f1_macro = clean_f1 + (0.1 if protocol == "train_on_variant" else 0.0)
+                            _append_result(
+                                results_csv,
+                                scenario_id="noise_edges_uniform",
+                                severity=severity,
+                                graph_seed=graph_seed,
+                                training_seed=training_seed,
+                                protocol=protocol,
+                                roc_auc=roc_auc,
+                                # Exact per-training-seed graph invariant.
+                                average_precision=clean_ap,
+                                f1_macro=f1_macro,
+                            )
+
+            cfg = {
+                "models": [{"model_id": "mlp"}],
+                "seeds": {"training_seeds": [1, 2]},
+                "scenarios": [
+                    {
+                        "scenario_id": "noise_edges_uniform",
+                        "severity_values": [0.0, 0.5, 1.0],
+                        "oracle_mode": "non_oracle",
+                    }
+                ],
+                "evaluation": {"audit_metrics": ["n_added_edge_pairs_actual"]},
+            }
+
+            fake_matplotlib, fake_pyplot_mod, _fake_pyplot = _fake_matplotlib_modules()
+            with mock.patch.dict(
+                sys.modules,
+                {"matplotlib": fake_matplotlib, "matplotlib.pyplot": fake_pyplot_mod},
+            ):
+                run_plots_stage(
+                    cfg,
+                    out_dir=out_dir,
+                    include_noop=False,
+                    only_clean=False,
+                    max_variants=None,
+                    max_training_seeds=None,
+                    ci=True,
+                )
+
+            summary_rows = _read_csv_rows(out_dir / "plots" / "summary_curves.csv")
+            stress_summary = next(
+                row
+                for row in summary_rows
+                if row["protocol"] == "train_clean_eval_all"
+                and row["metric"] == "average_precision"
+                and row["severity"] == "1.0"
+            )
+            self.assertEqual(stress_summary["n_runs"], "4")
+            self.assertEqual(stress_summary["n_training_seeds"], "2")
+            self.assertEqual(stress_summary["n_graph_seeds"], "2")
+            self.assertEqual(stress_summary["n_seed_cells"], "4")
+            self.assertEqual(stress_summary["ci_method"], "crossed_training_graph_seed_bootstrap")
+
+            drop_rows = _read_csv_rows(out_dir / "plots" / "performance_drop_max_stress.csv")
+            invariant_drop = next(
+                row
+                for row in drop_rows
+                if row["protocol"] == "train_clean_eval_all"
+                and row["metric"] == "average_precision"
+            )
+            for field in ("drop_mean", "drop_std", "drop_ci_lower", "drop_ci_upper"):
+                self.assertAlmostEqual(float(invariant_drop[field]), 0.0, places=12)
+            self.assertEqual(invariant_drop["n_paired_training_seeds"], "2")
+            self.assertEqual(invariant_drop["n_graph_seeds"], "2")
+            self.assertEqual(
+                invariant_drop["ci_method"],
+                "paired_drop_crossed_training_graph_seed_bootstrap",
+            )
+
+            robust_rows = _read_csv_rows(out_dir / "plots" / "robustness_scores.csv")
+            paired_curve = next(
+                row
+                for row in robust_rows
+                if row["protocol"] == "train_clean_eval_all" and row["metric"] == "roc_auc"
+            )
+            self.assertAlmostEqual(float(paired_curve["robustness_auc_mean"]), 0.5, places=12)
+            self.assertAlmostEqual(float(paired_curve["robustness_auc_std"]), 0.0, places=12)
+            self.assertAlmostEqual(float(paired_curve["robustness_auc_ci_lower"]), 0.5, places=12)
+            self.assertAlmostEqual(float(paired_curve["robustness_auc_ci_upper"]), 0.5, places=12)
+            self.assertEqual(paired_curve["n_paired_seed_cells"], "4")
+            self.assertEqual(
+                paired_curve["ci_method"],
+                "paired_curve_crossed_training_graph_seed_bootstrap",
+            )
+
+            contrast_rows = _read_csv_rows(out_dir / "plots" / "protocol_contrasts.csv")
+            protocol_contrast = next(
+                row
+                for row in contrast_rows
+                if row["metric"] == "f1_macro" and row["severity"] == "1.0"
+            )
+            self.assertAlmostEqual(float(protocol_contrast["contrast_mean"]), 0.1, places=12)
+            self.assertAlmostEqual(float(protocol_contrast["contrast_ci_lower"]), 0.1, places=12)
+            self.assertAlmostEqual(float(protocol_contrast["contrast_ci_upper"]), 0.1, places=12)
+            self.assertEqual(protocol_contrast["n_pairs"], "4")
+            self.assertEqual(protocol_contrast["n_training_seeds"], "2")
+            self.assertEqual(protocol_contrast["n_graph_seeds"], "2")
+            self.assertEqual(protocol_contrast["claim_scope"], "non_oracle_controlled_stress")
+            self.assertEqual(protocol_contrast["operational_ranking_eligible"], "True")
+
+            worst_rows = _read_csv_rows(out_dir / "plots" / "worst_case_performance.csv")
+            self.assertIn("retention_fraction_mean", worst_rows[0])
+            self.assertIn("retention_ci_method", worst_rows[0])
+            self.assertTrue(worst_rows)
+            self.assertTrue(
+                all(
+                    row["selection_method"] == "minimum_configured_nonzero_point_mean"
+                    for row in worst_rows
+                )
+            )
+
+            legacy_cross_contrasts = _read_csv_rows(
+                out_dir / "plots" / "protocol_contrasts_cross_split.csv"
+            )
+            self.assertTrue(legacy_cross_contrasts)
+            self.assertEqual(
+                {row["split_regime_id"] for row in legacy_cross_contrasts},
+                {"allocation_unspecified"},
+            )
+            self.assertEqual({row["train_size"] for row in legacy_cross_contrasts}, {""})
+            legacy_cross_worst = _read_csv_rows(
+                out_dir / "plots" / "worst_case_performance_cross_split.csv"
+            )
+            self.assertTrue(legacy_cross_worst)
+            self.assertEqual(
+                {row["split_regime_id"] for row in legacy_cross_worst},
+                {"allocation_unspecified"},
+            )
 
     def test_run_plots_stage_prints_completeness_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -798,6 +1273,14 @@ class PlotsStageTests(unittest.TestCase):
             ]
             self.assertEqual({row["protocol"] for row in shift_rows}, {"train_on_variant", "train_clean_eval_all"})
             self.assertEqual({row["oracle_labels"] for row in shift_rows}, {"True"})
+            self.assertEqual(
+                {(row["protocol"], row["claim_scope"]) for row in shift_rows},
+                {
+                    ("train_on_variant", "oracle_privileged_training_diagnostic"),
+                    ("train_clean_eval_all", "oracle_shift_sensitivity_diagnostic"),
+                },
+            )
+            self.assertEqual({row["operational_ranking_eligible"] for row in shift_rows}, {"False"})
             self.assertEqual({row["mean"] for row in shift_rows}, {"0.6000000000000001"})
             self.assertTrue((out_dir / "plots" / "train_clean_eval_all" / "yelpchi" / "s0" / "audit__camouflage_relation_oracle__fraud_to_normal_neighbor_ratio_shift.png").exists())
 

@@ -67,16 +67,20 @@ def summarize_results_by_training_seed(
     *,
     out_csv_path: Path,
     model_ids: set[str] | None = None,
+    protocols: set[str] | None = None,
 ) -> None:
     """Summarize `results.csv` into mean/std across training seeds.
 
     Groups by (experiment_name, dataset_id, split_id, scenario_id, severity, graph_seed, model_id, protocol).
-    Filters to status=="ok". If model_ids is provided, filters to those model_id values.
+    Filters to status=="ok". Optional model and protocol filters are normalized before use.
     """
     if not results_csv_path.exists():
         raise FileNotFoundError(f"results.csv not found: {results_csv_path}")
 
     groups: dict[tuple, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    normalized_protocols = None
+    if protocols is not None:
+        normalized_protocols = {normalize_protocol(value) for value in protocols}
 
     with results_csv_path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -85,6 +89,9 @@ def summarize_results_by_training_seed(
                 continue
             mid = str(row.get("model_id", ""))
             if model_ids is not None and mid not in model_ids:
+                continue
+            protocol = normalize_protocol(row.get("protocol", ""))
+            if normalized_protocols is not None and protocol not in normalized_protocols:
                 continue
 
             key = (
@@ -95,7 +102,7 @@ def summarize_results_by_training_seed(
                 float(row.get("severity", 0.0) or 0.0),
                 _safe_int(row.get("graph_seed", 0)),
                 mid,
-                normalize_protocol(row.get("protocol", "")),
+                protocol,
             )
 
             groups[key]["roc_auc"].append(_safe_float(row.get("roc_auc", "")))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import traceback
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from .results import (
     ensure_results_csv,
     load_completed_keys,
     make_run_key,
+    truncate_error_message,
     write_result_row,
 )
 from .secgfd_stage import (
@@ -201,6 +203,7 @@ def run_shift_stage(
             results_csv,
             out_csv_path=out_dir / "results_summary_shift.csv",
             model_ids=set(),
+            protocols={PROTOCOL_TRAIN_CLEAN_EVAL_ALL},
         )
         return
 
@@ -281,6 +284,7 @@ def run_shift_stage(
                     try:
                         clean_graph = load_graph_bin(Path(clean_graph_path))
                     except Exception as e:
+                        traceback.print_exc()
                         clean_graph_error = truncate_error_message(e)
                         clean_graph_error_dt = time.perf_counter() - clean_load_t0
 
@@ -327,6 +331,7 @@ def run_shift_stage(
                     )
                     train_dt = time.perf_counter() - train_t0
                 except Exception as e:
+                    traceback.print_exc()
                     train_error = truncate_error_message(e)
                     dt = time.perf_counter() - train_t0
                     for variant, run_key in pending_variants:
@@ -382,6 +387,7 @@ def run_shift_stage(
                             roc_auc=float(out["roc_auc"]),
                         )
                     except Exception as e:
+                        traceback.print_exc()
                         dt = time.perf_counter() - eval_t0
                         if variant.scenario_id == "clean" and float(variant.severity) == 0.0:
                             dt += float(train_dt)
@@ -412,4 +418,5 @@ def run_shift_stage(
         results_csv,
         out_csv_path=out_dir / "results_summary_shift.csv",
         model_ids=set(model_ids),
+        protocols={PROTOCOL_TRAIN_CLEAN_EVAL_ALL},
     )

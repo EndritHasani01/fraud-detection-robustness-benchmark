@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,6 @@ from .results import (
 )
 from .summarize import summarize_results_by_training_seed
 from .variants import (
-    VariantRow,
     class_weights_from_train_labels,
     filter_variants,
     load_graph_bin,
@@ -42,11 +42,14 @@ class PMPModelArtifact:
     state_dict: dict[str, Any]
     threshold: float
     device: str
+    epochs_trained: int = 0
+    best_epoch: int = 0
+    best_validation_monitor: float | None = None
+    validation_monitor: str = "roc_auc"
+    stopping_reason: str = "max_epochs"
 
 
 def _row_normalize_features(x, *, eps: float = 0.01):
-    import torch
-
     denom = x.sum(dim=1, keepdim=True) + float(eps)
     return x / denom
 
@@ -205,6 +208,19 @@ def _make_dataloaders(g, *, train_idx, val_idx, test_idx, cfg_pmp: dict[str, Any
     return train_loader, val_loader, test_loader
 
 
+def _reshape_binary_logits(logits):
+    """Restore the batch dimension removed by PMP's terminal bare squeeze()."""
+    if logits.ndim == 1:
+        if int(logits.numel()) != 2:
+            raise RuntimeError(
+                f"PMP returned a one-dimensional tensor with {int(logits.numel())} values; expected 2."
+            )
+        logits = logits.reshape(1, 2)
+    if logits.ndim != 2 or int(logits.shape[1]) != 2:
+        raise RuntimeError(f"PMP logits must have shape [batch, 2], found {tuple(logits.shape)}.")
+    return logits
+
+
 def _predict_probs(model, relations, loader, *, device: str):
     import numpy as np
     import torch
@@ -218,9 +234,13 @@ def _predict_probs(model, relations, loader, *, device: str):
         for _input_nodes, _output_nodes, blocks in loader:
             blocks = [b.to(device) for b in blocks]
             feats = blocks[0].srcdata["feature"].to(device)
-            logits = model(blocks, relations, feats)
+            logits = _reshape_binary_logits(model(blocks, relations, feats))
             probs = F.softmax(logits, dim=1)[:, 1]
-            y = blocks[-1].dstdata["label"].to(device).squeeze().to(torch.int64)
+            y = blocks[-1].dstdata["label"].to(device).reshape(-1).to(torch.int64)
+            if int(logits.shape[0]) != int(y.shape[0]):
+                raise RuntimeError(
+                    f"PMP prediction/label batch mismatch: logits={tuple(logits.shape)}, labels={tuple(y.shape)}."
+                )
 
             y_true_parts.append(y.detach().cpu().numpy())
             y_score_parts.append(probs.detach().cpu().numpy())
@@ -236,7 +256,9 @@ def _resolve_requested_device(device: str) -> str:
     if device not in {"cpu", "cuda"}:
         raise ValueError("device must be 'cpu' or 'cuda'")
     if device == "cuda" and not torch.cuda.is_available():
-        device = "cpu"
+        raise RuntimeError(
+            "CUDA was requested for PMP training, but PyTorch reports that CUDA is unavailable."
+        )
     return str(device)
 
 
@@ -264,6 +286,11 @@ def _build_pmp_model(g, *, repo_root: Path, cfg_pmp: dict[str, Any], device: str
     num_trans = int(cfg_pmp.get("num_trans", 1))
     agg = str(cfg_pmp.get("agg", "mean"))
     relation_agg = str(cfg_pmp.get("relation_agg", "cat"))
+    if relation_agg != "cat":
+        raise RuntimeError(
+            "The pinned PMP integration requires relation_agg='cat'. "
+            "Its upstream mean/add branches call torch reductions on a Python list."
+        )
 
     model = LASAGE_S(
         in_size=feat_dim,
@@ -285,9 +312,10 @@ def _build_pmp_model(g, *, repo_root: Path, cfg_pmp: dict[str, Any], device: str
     if effective_device == "cuda":
         try:
             model = model.to("cuda")
-        except Exception:
-            effective_device = "cpu"
-            model = model.to("cpu")
+        except Exception as exc:
+            raise RuntimeError(
+                "CUDA was requested for PMP, but the model could not be moved to CUDA."
+            ) from exc
     else:
         model = model.to("cpu")
     return model, relations, effective_device
@@ -357,15 +385,23 @@ def train_pmp_model(
         best_monitor = -float("inf")
         best_state = None
         bad_epochs = 0
+        best_epoch = 0
+        epochs_trained = 0
+        stopping_reason = "max_epochs"
 
         for _epoch in range(epochs):
+            epochs_trained = int(_epoch) + 1
             model.train()
             for _in_nodes, _out_nodes, blocks in train_loader:
                 blocks = [b.to(effective_device) for b in blocks]
                 feats = blocks[0].srcdata["feature"].to(effective_device)
-                labels = blocks[-1].dstdata["label"].to(effective_device).squeeze().to(torch.int64)
+                labels = blocks[-1].dstdata["label"].to(effective_device).reshape(-1).to(torch.int64)
 
-                logits = model(blocks, relations, feats)
+                logits = _reshape_binary_logits(model(blocks, relations, feats))
+                if int(logits.shape[0]) != int(labels.shape[0]):
+                    raise RuntimeError(
+                        f"PMP training batch mismatch: logits={tuple(logits.shape)}, labels={tuple(labels.shape)}."
+                    )
                 loss = loss_fn(logits, labels)
 
                 opt.zero_grad(set_to_none=True)
@@ -379,11 +415,13 @@ def train_pmp_model(
 
             if monitor > best_monitor:
                 best_monitor = monitor
+                best_epoch = int(_epoch) + 1
                 best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
                 bad_epochs = 0
             else:
                 bad_epochs += 1
                 if es_patience > 0 and bad_epochs >= es_patience:
+                    stopping_reason = "early_stopping"
                     break
 
         if best_state is not None:
@@ -396,7 +434,12 @@ def train_pmp_model(
             cfg_pmp=dict(cfg_pmp),
             state_dict={k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
             threshold=float(th.threshold),
-            device=str(device),
+            device=str(effective_device),
+            epochs_trained=int(epochs_trained),
+            best_epoch=int(best_epoch),
+            best_validation_monitor=(float(best_monitor) if math.isfinite(best_monitor) else None),
+            validation_monitor="roc_auc",
+            stopping_reason=str(stopping_reason),
         )
     finally:
         g.ndata["feature"] = orig_x
@@ -457,6 +500,11 @@ def eval_pmp_model(
             "f1_macro": float(f1m),
             "threshold": use_threshold,
             "duration_sec": float(time.perf_counter() - t0),
+            "epochs_trained": int(artifact.epochs_trained),
+            "best_epoch": int(artifact.best_epoch),
+            "best_validation_monitor": artifact.best_validation_monitor,
+            "validation_monitor": artifact.validation_monitor,
+            "stopping_reason": artifact.stopping_reason,
         }
     finally:
         g.ndata["feature"] = orig_x
@@ -612,6 +660,7 @@ def run_pmp_stage(
         try:
             g = load_graph_bin(Path(v.graph_path))
         except Exception as e:
+            traceback.print_exc()
             dt = time.perf_counter() - graph_t0
             for training_seed, run_key in pending_runs:
                 write_result_row(
@@ -667,6 +716,7 @@ def run_pmp_stage(
                     roc_auc=float(out["roc_auc"]),
                 )
             except Exception as e:
+                traceback.print_exc()
                 dt = time.perf_counter() - run_t0
                 write_result_row(
                     results_csv,
@@ -694,4 +744,5 @@ def run_pmp_stage(
         results_csv,
         out_csv_path=out_dir / "results_summary_pmp.csv",
         model_ids={"pmp"},
+        protocols={PROTOCOL_TRAIN_ON_VARIANT},
     )

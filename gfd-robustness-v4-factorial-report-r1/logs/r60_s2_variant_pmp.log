@@ -1,0 +1,127 @@
+
+
+=== attempt 1; GPU 1; 2026-07-13T16:49:13.133125+00:00 ===
+[preflight] 21 variants x 5 seeds x 1 models = 105 runs total
+[preflight] 0 already done, 105 remaining
+[preflight] no estimate available
+[preflight] 21 variants x 5 seeds x 1 models = 105 runs total
+[preflight] 0 already done, 105 remaining
+[preflight] no estimate available
+/kaggle/working/fraud-benchmark-py311/lib/python3.11/site-packages/dgl/dataloading/dataloader.py:1149: DGLWarning: Dataloader CPU affinity opt is not enabled, consider switching it on (see enable_cpu_affinity() or CPU best practices for DGL [https://docs.dgl.ai/tutorials/cpu/cpu_best_practises.html])
+  dgl_warning(
+[pmp] [1/105] pmp / clean / sev=0 / gs=3253 / ts=0  ok  auc=0.856  49.4s
+[pmp] [2/105] pmp / clean / sev=0 / gs=3253 / ts=1  ok  auc=0.863  52.8s
+[pmp] [3/105] pmp / clean / sev=0 / gs=3253 / ts=2  ok  auc=0.851  34.9s
+[pmp] [4/105] pmp / clean / sev=0 / gs=3253 / ts=3  ok  auc=0.861  60.6s
+[pmp] [5/105] pmp / clean / sev=0 / gs=3253 / ts=4  ok  auc=0.873  66.5s
+[pmp] [6/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.896  63.2s
+[pmp] [7/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.890  52.7s
+[pmp] [8/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.884  51.5s
+[pmp] [9/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=3  ok  auc=0.889  52.0s
+[pmp] [10/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=4  ok  auc=0.887  55.7s
+[pmp] [10/105] ETA ~1h 27m
+[pmp] [11/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.897  63.4s
+[pmp] [12/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.889  55.9s
+[pmp] [13/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.887  48.3s
+[pmp] [14/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=3  ok  auc=0.889  49.1s
+[pmp] [15/105] pmp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=4  ok  auc=0.888  45.2s
+[pmp] [16/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.924  59.8s
+[pmp] [17/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.926  53.6s
+[pmp] [18/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.921  45.3s
+[pmp] [19/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=3  ok  auc=0.890  22.8s
+[pmp] [20/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=4  ok  auc=0.924  35.9s
+[pmp] [20/105] ETA ~1h 1m
+[pmp] [21/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.929  47.6s
+[pmp] [22/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.880  13.2s
+[pmp] [23/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.926  57.3s
+[pmp] [24/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=3  ok  auc=0.925  54.5s
+[pmp] [25/105] pmp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=4  ok  auc=0.924  53.1s
+[pmp] [26/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.845  31.3s
+[pmp] [27/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.864  51.8s
+[pmp] [28/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.844  26.4s
+[pmp] [29/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=3  ok  auc=0.849  40.0s
+[pmp] [30/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=4  ok  auc=0.850  38.8s
+[pmp] [30/105] ETA ~47m 6s
+[pmp] [31/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.841  27.9s
+[pmp] [32/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.845  50.4s
+[pmp] [33/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.847  35.4s
+[pmp] [34/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=3  ok  auc=0.847  35.2s
+[pmp] [35/105] pmp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=4  ok  auc=0.850  47.3s
+[pmp] [36/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.841  32.2s
+[pmp] [37/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.841  36.3s
+[pmp] [38/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.843  39.8s
+[pmp] [39/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=3  ok  auc=0.840  36.6s
+[pmp] [40/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=4  ok  auc=0.860  60.2s
+[pmp] [40/105] ETA ~44m 26s
+[pmp] [41/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.840  28.0s
+[pmp] [42/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.846  49.6s
+[pmp] [43/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.838  49.7s
+[pmp] [44/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=3  ok  auc=0.858  58.2s
+[pmp] [45/105] pmp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=4  ok  auc=0.844  33.7s
+[pmp] [46/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.827  66.1s
+[pmp] [47/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.824  57.3s
+[pmp] [48/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.818  33.3s
+[pmp] [49/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=3  ok  auc=0.827  73.4s
+[pmp] [50/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=4  ok  auc=0.822  42.6s
+[pmp] [50/105] ETA ~49m 59s
+[pmp] [51/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.809  45.3s
+[pmp] [52/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.809  56.6s
+[pmp] [53/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.809  49.7s
+[pmp] [54/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=3  ok  auc=0.812  51.8s
+[pmp] [55/105] pmp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=4  ok  auc=0.810  47.6s
+[pmp] [56/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.782  80.7s
+[pmp] [57/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.784  48.9s
+[pmp] [58/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.771  60.0s
+[pmp] [59/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=3  ok  auc=0.772  46.4s
+[pmp] [60/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=4  ok  auc=0.771  38.3s
+[pmp] [60/105] ETA ~41m 8s
+[pmp] [61/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.787  54.9s
+[pmp] [62/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.776  55.5s
+[pmp] [63/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.788  83.1s
+[pmp] [64/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=3  ok  auc=0.786  55.8s
+[pmp] [65/105] pmp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=4  ok  auc=0.773  45.4s
+[pmp] [66/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.856  52.5s
+[pmp] [67/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.853  38.6s
+[pmp] [68/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.853  43.0s
+[pmp] [69/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=3  ok  auc=0.862  79.0s
+[pmp] [70/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=4  ok  auc=0.858  49.8s
+[pmp] [70/105] ETA ~30m 40s
+[pmp] [71/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.858  57.8s
+[pmp] [72/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.876  78.5s
+[pmp] [73/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.853  31.4s
+[pmp] [74/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=3  ok  auc=0.877  78.3s
+[pmp] [75/105] pmp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=4  ok  auc=0.861  60.2s
+[pmp] [76/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.860  63.9s
+[pmp] [77/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.879  76.4s
+[pmp] [78/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.872  76.0s
+[pmp] [79/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=3  ok  auc=0.875  76.0s
+[pmp] [80/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=4  ok  auc=0.853  41.9s
+[pmp] [80/105] ETA ~27m 51s
+[pmp] [81/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.858  48.7s
+[pmp] [82/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.860  54.8s
+[pmp] [83/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.854  36.3s
+[pmp] [84/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=3  ok  auc=0.847  33.6s
+[pmp] [85/105] pmp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=4  ok  auc=0.847  30.7s
+[pmp] [86/105] pmp / noise_edges_uniform / sev=0.1 / gs=0 / ts=0  ok  auc=0.867  43.5s
+[pmp] [87/105] pmp / noise_edges_uniform / sev=0.1 / gs=0 / ts=1  ok  auc=0.851  32.4s
+[pmp] [88/105] pmp / noise_edges_uniform / sev=0.1 / gs=0 / ts=2  ok  auc=0.850  28.8s
+[pmp] [89/105] pmp / noise_edges_uniform / sev=0.1 / gs=0 / ts=3  ok  auc=0.858  48.0s
+[pmp] [90/105] pmp / noise_edges_uniform / sev=0.1 / gs=0 / ts=4  ok  auc=0.853  31.4s
+[pmp] [90/105] ETA ~9m 12s
+[pmp] [91/105] pmp / noise_edges_uniform / sev=0.1 / gs=1 / ts=0  ok  auc=0.850  32.5s
+[pmp] [92/105] pmp / noise_edges_uniform / sev=0.1 / gs=1 / ts=1  ok  auc=0.852  38.6s
+[pmp] [93/105] pmp / noise_edges_uniform / sev=0.1 / gs=1 / ts=2  ok  auc=0.855  40.1s
+[pmp] [94/105] pmp / noise_edges_uniform / sev=0.1 / gs=1 / ts=3  ok  auc=0.846  29.2s
+[pmp] [95/105] pmp / noise_edges_uniform / sev=0.1 / gs=1 / ts=4  ok  auc=0.852  36.1s
+[pmp] [96/105] pmp / noise_edges_uniform / sev=0.2 / gs=0 / ts=0  ok  auc=0.843  23.1s
+[pmp] [97/105] pmp / noise_edges_uniform / sev=0.2 / gs=0 / ts=1  ok  auc=0.850  39.9s
+[pmp] [98/105] pmp / noise_edges_uniform / sev=0.2 / gs=0 / ts=2  ok  auc=0.849  44.7s
+[pmp] [99/105] pmp / noise_edges_uniform / sev=0.2 / gs=0 / ts=3  ok  auc=0.847  51.2s
+[pmp] [100/105] pmp / noise_edges_uniform / sev=0.2 / gs=0 / ts=4  ok  auc=0.846  34.2s
+[pmp] [100/105] ETA ~3m 13s
+[pmp] [101/105] pmp / noise_edges_uniform / sev=0.2 / gs=1 / ts=0  ok  auc=0.848  30.8s
+[pmp] [102/105] pmp / noise_edges_uniform / sev=0.2 / gs=1 / ts=1  ok  auc=0.849  39.4s
+[pmp] [103/105] pmp / noise_edges_uniform / sev=0.2 / gs=1 / ts=2  ok  auc=0.847  35.7s
+[pmp] [104/105] pmp / noise_edges_uniform / sev=0.2 / gs=1 / ts=3  ok  auc=0.852  49.4s
+[pmp] [105/105] pmp / noise_edges_uniform / sev=0.2 / gs=1 / ts=4  ok  auc=0.849  43.7s
+[run] stage=matrix done in 5012.13s; out=/kaggle/working/gfd-robustness-v4-factorial-r1/lanes/r60_s2_variant_pmp

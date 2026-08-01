@@ -1,0 +1,148 @@
+
+
+=== attempt 1; GPU 0; 2026-07-11T22:42:43.701457+00:00 ===
+[preflight] 21 variants x 3 seeds x 2 models = 126 runs total
+[preflight] 0 already done, 126 remaining
+[preflight] no estimate available
+[preflight] 21 variants x 3 seeds x 2 models = 126 runs total
+[preflight] 0 already done, 126 remaining
+[preflight] no estimate available
+[baselines] [1/126] mlp / clean / sev=0 / gs=717 / ts=0  ok  auc=0.748  1.4s
+[baselines] [2/126] sage / clean / sev=0 / gs=717 / ts=0  ok  auc=0.796  3.5s
+[baselines] [3/126] mlp / clean / sev=0 / gs=717 / ts=1  ok  auc=0.798  2.1s
+[baselines] [4/126] sage / clean / sev=0 / gs=717 / ts=1  ok  auc=0.783  3.5s
+[baselines] [5/126] mlp / clean / sev=0 / gs=717 / ts=2  ok  auc=0.798  2.2s
+[baselines] [6/126] sage / clean / sev=0 / gs=717 / ts=2  ok  auc=0.797  3.5s
+[baselines] [7/126] mlp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.748  0.5s
+[baselines] [8/126] sage / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.845  3.5s
+[baselines] [9/126] mlp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.798  2.1s
+[baselines] [10/126] sage / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.703  1.3s
+[baselines] [10/126] ETA ~4m 14s
+[baselines] [11/126] mlp / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.798  2.0s
+[baselines] [12/126] sage / heterophily_rewire_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.851  3.6s
+[baselines] [13/126] mlp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.748  0.5s
+[baselines] [14/126] sage / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.844  3.5s
+[baselines] [15/126] mlp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.798  1.8s
+[baselines] [16/126] sage / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.834  3.4s
+[baselines] [17/126] mlp / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.798  1.7s
+[baselines] [18/126] sage / heterophily_rewire_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.849  3.5s
+[baselines] [19/126] mlp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.748  0.5s
+[baselines] [20/126] sage / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.902  3.6s
+[baselines] [20/126] ETA ~4m 31s
+[baselines] [21/126] mlp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.798  2.1s
+[baselines] [22/126] sage / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.890  3.6s
+[baselines] [23/126] mlp / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.798  2.0s
+[baselines] [24/126] sage / heterophily_rewire_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.903  3.6s
+[baselines] [25/126] mlp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.748  0.5s
+[baselines] [26/126] sage / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.899  3.6s
+[baselines] [27/126] mlp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.798  2.0s
+[baselines] [28/126] sage / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.880  3.5s
+[baselines] [29/126] mlp / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.798  2.1s
+[baselines] [30/126] sage / heterophily_rewire_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.908  3.5s
+[baselines] [30/126] ETA ~4m 41s
+[baselines] [31/126] mlp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.748  0.4s
+[baselines] [32/126] sage / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.782  3.5s
+[baselines] [33/126] mlp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.798  1.7s
+[baselines] [34/126] sage / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.614  1.1s
+[baselines] [35/126] mlp / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.798  2.1s
+[baselines] [36/126] sage / heterophily_rewire_nonoracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.789  3.5s
+[baselines] [37/126] mlp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.748  0.5s
+[baselines] [38/126] sage / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.682  1.2s
+[baselines] [39/126] mlp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.798  2.0s
+[baselines] [40/126] sage / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.606  1.1s
+[baselines] [40/126] ETA ~2m 24s
+[baselines] [41/126] mlp / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.798  2.1s
+[baselines] [42/126] sage / heterophily_rewire_nonoracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.788  3.4s
+[baselines] [43/126] mlp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.748  0.4s
+[baselines] [44/126] sage / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.781  3.5s
+[baselines] [45/126] mlp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.798  2.1s
+[baselines] [46/126] sage / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.639  1.1s
+[baselines] [47/126] mlp / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.798  2.2s
+[baselines] [48/126] sage / heterophily_rewire_nonoracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.787  3.5s
+[baselines] [49/126] mlp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.748  0.4s
+[baselines] [50/126] sage / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.778  3.6s
+[baselines] [50/126] ETA ~2m 45s
+[baselines] [51/126] mlp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.798  1.9s
+[baselines] [52/126] sage / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.610  1.0s
+[baselines] [53/126] mlp / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.798  2.0s
+[baselines] [54/126] sage / heterophily_rewire_nonoracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.788  3.5s
+[baselines] [55/126] mlp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.718  0.5s
+[baselines] [56/126] sage / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.763  3.5s
+[baselines] [57/126] mlp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.757  2.0s
+[baselines] [58/126] sage / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.747  3.6s
+[baselines] [59/126] mlp / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.760  2.3s
+[baselines] [60/126] sage / camouflage_feature_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.764  3.6s
+[baselines] [60/126] ETA ~3m 18s
+[baselines] [61/126] mlp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.706  0.6s
+[baselines] [62/126] sage / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.755  3.6s
+[baselines] [63/126] mlp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.747  1.9s
+[baselines] [64/126] sage / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.583  1.1s
+[baselines] [65/126] mlp / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.746  1.7s
+[baselines] [66/126] sage / camouflage_feature_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.746  3.4s
+[baselines] [67/126] mlp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.676  0.5s
+[baselines] [68/126] sage / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.720  3.3s
+[baselines] [69/126] mlp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.711  1.9s
+[baselines] [70/126] sage / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.707  3.4s
+[baselines] [70/126] ETA ~2m 21s
+[baselines] [71/126] mlp / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.710  1.9s
+[baselines] [72/126] sage / camouflage_feature_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.714  3.5s
+[baselines] [73/126] mlp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.703  1.9s
+[baselines] [74/126] sage / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.700  3.6s
+[baselines] [75/126] mlp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.698  2.0s
+[baselines] [76/126] sage / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.579  1.4s
+[baselines] [77/126] mlp / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.701  2.0s
+[baselines] [78/126] sage / camouflage_feature_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.705  3.3s
+[baselines] [79/126] mlp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.748  0.4s
+[baselines] [80/126] sage / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=0  ok  auc=0.680  1.1s
+[baselines] [80/126] ETA ~1m 15s
+[baselines] [81/126] mlp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.798  1.8s
+[baselines] [82/126] sage / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=1  ok  auc=0.785  3.5s
+[baselines] [83/126] mlp / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.798  2.0s
+[baselines] [84/126] sage / camouflage_relation_oracle / sev=0.15 / gs=0 / ts=2  ok  auc=0.797  3.5s
+[baselines] [85/126] mlp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.748  0.5s
+[baselines] [86/126] sage / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=0  ok  auc=0.681  1.1s
+[baselines] [87/126] mlp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.798  1.7s
+[baselines] [88/126] sage / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=1  ok  auc=0.609  1.0s
+[baselines] [89/126] mlp / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.798  2.0s
+[baselines] [90/126] sage / camouflage_relation_oracle / sev=0.15 / gs=1 / ts=2  ok  auc=0.797  3.6s
+[baselines] [90/126] ETA ~1m 8s
+[baselines] [91/126] mlp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.748  0.5s
+[baselines] [92/126] sage / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=0  ok  auc=0.790  3.4s
+[baselines] [93/126] mlp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.798  2.0s
+[baselines] [94/126] sage / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=1  ok  auc=0.783  3.5s
+[baselines] [95/126] mlp / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.798  2.0s
+[baselines] [96/126] sage / camouflage_relation_oracle / sev=0.3 / gs=0 / ts=2  ok  auc=0.797  3.2s
+[baselines] [97/126] mlp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.748  0.4s
+[baselines] [98/126] sage / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=0  ok  auc=0.798  3.4s
+[baselines] [99/126] mlp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.798  2.0s
+[baselines] [100/126] sage / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=1  ok  auc=0.609  1.1s
+[baselines] [100/126] ETA ~53s
+[baselines] [101/126] mlp / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.798  2.0s
+[baselines] [102/126] sage / camouflage_relation_oracle / sev=0.3 / gs=1 / ts=2  ok  auc=0.797  3.5s
+[baselines] [103/126] mlp / noise_edges_uniform / sev=0.1 / gs=0 / ts=0  ok  auc=0.748  0.5s
+[baselines] [104/126] sage / noise_edges_uniform / sev=0.1 / gs=0 / ts=0  ok  auc=0.683  1.2s
+[baselines] [105/126] mlp / noise_edges_uniform / sev=0.1 / gs=0 / ts=1  ok  auc=0.798  1.8s
+[baselines] [106/126] sage / noise_edges_uniform / sev=0.1 / gs=0 / ts=1  ok  auc=0.611  1.0s
+[baselines] [107/126] mlp / noise_edges_uniform / sev=0.1 / gs=0 / ts=2  ok  auc=0.798  1.7s
+[baselines] [108/126] sage / noise_edges_uniform / sev=0.1 / gs=0 / ts=2  ok  auc=0.791  3.7s
+[baselines] [109/126] mlp / noise_edges_uniform / sev=0.1 / gs=1 / ts=0  ok  auc=0.748  0.4s
+[baselines] [110/126] sage / noise_edges_uniform / sev=0.1 / gs=1 / ts=0  ok  auc=0.683  1.2s
+[baselines] [110/126] ETA ~26s
+[baselines] [111/126] mlp / noise_edges_uniform / sev=0.1 / gs=1 / ts=1  ok  auc=0.798  2.1s
+[baselines] [112/126] sage / noise_edges_uniform / sev=0.1 / gs=1 / ts=1  ok  auc=0.612  1.1s
+[baselines] [113/126] mlp / noise_edges_uniform / sev=0.1 / gs=1 / ts=2  ok  auc=0.798  2.0s
+[baselines] [114/126] sage / noise_edges_uniform / sev=0.1 / gs=1 / ts=2  ok  auc=0.788  3.8s
+[baselines] [115/126] mlp / noise_edges_uniform / sev=0.2 / gs=0 / ts=0  ok  auc=0.748  0.5s
+[baselines] [116/126] sage / noise_edges_uniform / sev=0.2 / gs=0 / ts=0  ok  auc=0.683  1.3s
+[baselines] [117/126] mlp / noise_edges_uniform / sev=0.2 / gs=0 / ts=1  ok  auc=0.798  2.1s
+[baselines] [118/126] sage / noise_edges_uniform / sev=0.2 / gs=0 / ts=1  ok  auc=0.613  1.2s
+[baselines] [119/126] mlp / noise_edges_uniform / sev=0.2 / gs=0 / ts=2  ok  auc=0.798  2.1s
+[baselines] [120/126] sage / noise_edges_uniform / sev=0.2 / gs=0 / ts=2  ok  auc=0.788  3.8s
+[baselines] [120/126] ETA ~13s
+[baselines] [121/126] mlp / noise_edges_uniform / sev=0.2 / gs=1 / ts=0  ok  auc=0.748  0.5s
+[baselines] [122/126] sage / noise_edges_uniform / sev=0.2 / gs=1 / ts=0  ok  auc=0.683  1.3s
+[baselines] [123/126] mlp / noise_edges_uniform / sev=0.2 / gs=1 / ts=1  ok  auc=0.798  1.6s
+[baselines] [124/126] sage / noise_edges_uniform / sev=0.2 / gs=1 / ts=1  ok  auc=0.613  1.2s
+[baselines] [125/126] mlp / noise_edges_uniform / sev=0.2 / gs=1 / ts=2  ok  auc=0.798  1.7s
+[baselines] [126/126] sage / noise_edges_uniform / sev=0.2 / gs=1 / ts=2  ok  auc=0.786  4.0s
+[run] stage=matrix done in 276.32s; out=/kaggle/working/gfd-robustness-v3-final-r5/lanes/variant_baselines
