@@ -1,2 +1,0 @@
-experiment_name,dataset_id,split_id,scenario_id,severity,graph_seed,model_id,n_runs,roc_auc_mean,roc_auc_std,average_precision_mean,average_precision_std,f1_macro_mean,f1_macro_std
-gfd_robustness_benchmark_v1,yelpchi,s0,clean,0,717,secgfd,2,0.6403290728719495,0.2811070659578931,0.3252589684063424,0.2842907694432453,0.5919048745509121,0.1663294664843461

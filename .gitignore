@@ -1,9 +1,15 @@
-runs/*/graphs
-runs/*/data
+# Local history and generated runtime output
+/_local_archive/
+/runs/
 __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
-docs/
-todos/
-AGENTS.md
+.ruff_cache/
+
+# Editor / Office temporary files
+~$*
+~WRL*.tmp
+
+# Older root Word export is open in Word; archive copy is preserved.
+/Graph_Fraud_Detection_Robustness_Academic_Report.docx
