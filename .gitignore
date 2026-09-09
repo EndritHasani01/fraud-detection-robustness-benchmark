@@ -20,7 +20,6 @@ __pycache__/
 
 # Keep only the notebook reproduction guide public.
 /docs/*
-!/docs/REPRODUCIBILITY.md
 
 # Local compatibility junction for historical frozen config paths.
 /Repos
