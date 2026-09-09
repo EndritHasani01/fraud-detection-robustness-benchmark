@@ -18,7 +18,7 @@ Oracle perturbations use label information and are diagnostic experiments, not e
 
 ## Run or inspect the implementation
 
-The [clean Kaggle notebook](KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb) contains the benchmark implementation, experiment configuration, setup, and runtime checks. It writes its own source files and downloads pinned upstream dependencies, so the separate local development folders are not required for this notebook workflow. Follow the [reproduction guide](docs/REPRODUCIBILITY.md).
+The [clean Kaggle notebook](KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb) contains the benchmark implementation, experiment configuration, setup, and runtime checks. It writes its own source files and downloads pinned upstream dependencies, so the separate local development folders are not required for this notebook workflow. Follow the [reproduction guide](REPRODUCIBILITY.md).
 
 | Location | Purpose |
 |---|---|
