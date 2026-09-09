@@ -17,6 +17,7 @@ __pycache__/
 /configs/
 /tools/
 /tests/
+/final-report/Fraud_Detection_Robustness_Presentation.pptx
 
 # Keep only the notebook reproduction guide public.
 /docs/*

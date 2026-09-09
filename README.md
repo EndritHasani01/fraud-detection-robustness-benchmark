@@ -5,7 +5,7 @@ Course final project: a controlled study of how graph-based fraud detectors resp
 ## Final submission
 
 1. Read the **[academic report (PDF)](final-report/Graph_Fraud_Detection_Robustness_Academic_Report.pdf)**.
-2. View the **[presentation](final-report/Fraud_Detection_Robustness_Presentation.pptx)**.
+2. View the **[presentation](final-report/Fraud_Detection_Robustness_Presentation.pdf)**.
 3. Inspect the [executed notebook with outputs](notebooks/KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb) and [final evidence bundle](gfd-robustness-v4-factorial-report-r1/README.md).
 
 The retained v4 results contain **5,040 successful evaluation rows**: 2,520 per training protocol, covering MLP, GraphSAGE, PMP, and SEC-GFD across six split/allocation identifiers. The evidence bundle retains the original results, executed configuration, audits, plots, and provenance.
