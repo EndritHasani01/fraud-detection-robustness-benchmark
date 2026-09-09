@@ -1,41 +1,24 @@
-# Reproducing and checking the benchmark
+# Reproducing the submitted experiment
 
-## Evidence versus a new run
+## Inspect the completed run
 
-The [final evidence bundle](../gfd-robustness-v4-factorial-report-r1/README.md) and [executed notebook](../notebooks/KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb) document the completed experiment. Consult the bundle's `config.json` and `kaggle_run_manifest.json` for the captured settings and revisions. The frozen repository [v4 factorial config](../configs/exp_yelpchi_v4_factorial.json) defines the factorial experiment; preserve all existing config JSON files unchanged.
+The [executed notebook](../notebooks/KAGGLE_DUAL_T4_RESEARCH_RUN_with_outputs_latest_v4_r1_multi_seeds.ipynb) and [final evidence bundle](../gfd-robustness-v4-factorial-report-r1/README.md) document the completed experiment. The bundle's [config.json](../gfd-robustness-v4-factorial-report-r1/config.json) captures its configuration, and [kaggle_run_manifest.json](../gfd-robustness-v4-factorial-report-r1/kaggle_run_manifest.json) records execution provenance. These historical files are preserved unchanged.
 
-## Kaggle execution
+## Execute the clean notebook
 
-Open the root [clean notebook](../KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb) in Kaggle, select the dual-T4 accelerator environment, enable the network access needed for setup, and follow its cells in order. Its setup cells specify the execution dependencies; its factorial workflow manages graph caches split by split. Preserve the newly generated evidence bundle when the run completes. Hardware availability, downloads, and a complete new training execution were not verified as part of repository organization.
+1. Upload [KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb](../KAGGLE_DUAL_T4_RESEARCH_RUN.ipynb) to Kaggle.
+2. Select the dual-T4 accelerator environment and enable internet access for dependency setup and dataset downloads.
+3. Run the cells in order, including setup and runtime checks, before starting the full experiment.
+4. Preserve the new results bundle, configuration, logs, and manifest when execution finishes.
 
-Check that embedded source and configuration match the repository before uploading:
+The notebook embeds 22 benchmark Python modules, the factorial experiment configuration, and its notebook contract test. It writes its own runtime source tree and downloads PMP and SEC-GFD at pinned upstream revisions. It does not require this repository's separate `benchmark/`, `configs/`, `tests/`, `tools/`, or vendored code directories. Those development folders remain local and ignored.
 
-```powershell
-py tools/sync_kaggle_notebook.py --check
-```
+The runtime uses its own `Repos/` paths inside Kaggle. The repository's vendored folder was renamed to `third_party/`; this does not change the notebook's independent runtime paths or the historical configuration. On the original development computer, an ignored `Repos` junction points to `third_party` so older local configurations still resolve.
 
-To deliberately refresh the clean notebook after a source change, run the same command without `--check`; do not overwrite the archived executed snapshot.
+The full factorial workflow manages graph caches split by split. Dataset downloads, graph caches, and the isolated Python runtime are not included in the submitted evidence bundle. A new execution is a new result set; do not overwrite the historical notebook or evidence.
 
-## Local development
+## Interpretation and verification limits
 
-Use Python 3.10/3.11 for the DGL/PyTorch research stack. The [CLI and environment reference](CLI_REFERENCE.md) preserves the existing platform-specific installation recipe and full command reference; the clean notebook contains the execution setup. Install the appropriate DGL/PyTorch builds for the chosen platform before training. Windows PMP requires `num_workers=0`.
+The historical results table contains 5,040 successful rows, evenly divided between `train_on_variant` and `train_clean_eval_all`. These are evaluation rows, not independent statistical replicates. Oracle scenarios must remain diagnostic and separate from non-oracle claims.
 
-After configuring dependencies, run a small developer experiment from the repository root:
-
-```powershell
-py -m benchmark.run --config configs/exp_yelpchi_v3_fast.json --stage graphs
-py -m benchmark.run --config configs/exp_yelpchi_v3_fast.json --stage baselines
-py -m benchmark.run --config configs/exp_yelpchi_v3_fast.json --stage plots
-```
-
-This smoke experiment is not the complete v4 study. Runtime output goes into ignored `runs/`; final submission evidence is retained separately. Training is resumable using the unified run key, and model thresholds must come from validation data.
-
-## Regression checks
-
-```powershell
-py -m unittest discover -s tests
-py tools/sync_kaggle_notebook.py --check
-git diff --check
-```
-
-Some tests need scientific dependencies; skipped tests do not validate model execution. Organization changes preserve source code, notebook contents, frozen JSON configurations, and research adapters. Local checks do not establish a new GPU run or production performance.
+Repository organization verified notebook/source synchronization and preservation of the notebook and evidence. It did not execute a new GPU experiment or verify current Kaggle hardware availability. The prior local regression suite passed 121 tests; its separate development files are intentionally excluded from this submission.

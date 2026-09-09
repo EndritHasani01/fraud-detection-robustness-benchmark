@@ -1,9 +1,6 @@
-# Final submission documents
+# Final submission
 
-- [Academic report (PDF)](Graph_Fraud_Detection_Robustness_Academic_Report.pdf): primary reading copy.
-- [Academic report (Word)](Graph_Fraud_Detection_Robustness_Academic_Report.docx): editable version.
-- [Presentation (PowerPoint)](Fraud_Detection_Robustness_Presentation.pptx): presentation from the former `final-report/report/` folder.
+- [Academic report (PDF)](Graph_Fraud_Detection_Robustness_Academic_Report.pdf)
+- [Presentation (PowerPoint)](Fraud_Detection_Robustness_Presentation.pptx)
 
-These files were preserved byte-for-byte from that submission folder. Older root exports and slide design assets are preserved in the ignored local archive. Organization did not rewrite or validate the contents of these binary documents.
-
-For the underlying measurements, use the [evidence index](../gfd-robustness-v4-factorial-report-r1/README.md); for detailed interpretation, read the [technical report](../GFD_ROBUSTNESS_FINAL_REPORT.md).
+Supporting measurements and provenance are in the [final evidence bundle](../gfd-robustness-v4-factorial-report-r1/README.md). The editable Word copy is preserved locally and excluded from Git.
