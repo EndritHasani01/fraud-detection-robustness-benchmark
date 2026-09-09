@@ -1,9 +1,33 @@
-runs/*/graphs
-runs/*/data
+# Local history and generated output
+/_local_archive/
+/runs/
 __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
-docs/
-todos/
-AGENTS.md
+.ruff_cache/
+
+# Personal notes, duplicate report sources, and development-only files
+/AGENTS.md
+/GFD_ROBUSTNESS_FINAL_REPORT.md
+/Graph_Fraud_Detection_Robustness_Academic_Report.docx
+/final-report/*.docx
+/project-explanation/
+/benchmark/
+/configs/
+/tools/
+/tests/
+
+# Keep only the notebook reproduction guide public.
+/docs/*
+
+# Local compatibility junction for historical frozen config paths.
+/Repos
+
+# Literature-reference clones not used by the executed model adapters.
+/third_party/CARE-GNN-master/
+/third_party/GAGA-master/
+
+# Office temporary files
+~$*
+~WRL*.tmp
